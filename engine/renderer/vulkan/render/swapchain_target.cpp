@@ -440,5 +440,5 @@ void SwapchainTarget::destroy(const VkDevice device) const noexcept {
     vkDestroySwapchainKHR(device, swapchain, nullptr);
 }
 
-}  // namespace vanguard::render
+}  // namespace vanta::render
 

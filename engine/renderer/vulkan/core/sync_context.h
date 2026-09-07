@@ -104,4 +104,4 @@ struct SyncContext {
     }
 };
 
-}  // namespace vanguard::render
+}  // namespace vanta::render

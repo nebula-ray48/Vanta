@@ -148,4 +148,4 @@ constexpr const char* get_mime_type_string(fastgltf::MimeType mime) {
     return scene;
 }
 
-}  // namespace vanguard::scene
+}  // namespace vanta::scene

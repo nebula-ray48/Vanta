@@ -82,4 +82,4 @@ struct GraphicsPipeline {
     void destroy(VkDevice device) const noexcept;
 };
 
-}  // namespace vanguard::render
+}  // namespace vanta::render

@@ -58,4 +58,4 @@ namespace vanta::scene {
 
     [[nodiscard]] std::expected<GltfScene, GltfLoadError> load_gltf(const std::filesystem::path& file_path);
 
-}  // namespace vanguard::scene
+}  // namespace vanta::scene

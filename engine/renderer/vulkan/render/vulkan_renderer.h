@@ -90,12 +90,12 @@ namespace vanta::render {
         VkDescriptorSet global_bindless_set_ = VK_NULL_HANDLE;
 
         std::expected<void, EngineError> initialize_textures();
-        std::vector<rey::vulkan::Texture> textures_;
+        std::vector<vanta::vulkan::Texture> textures_;
 
         AllocatedBuffer vertex_buffer_;
         AllocatedBuffer index_buffer_;
         uint32_t index_count_ = 0;
     };
 
-}  // namespace vanguard::render
+}  // namespace vanta::render
 

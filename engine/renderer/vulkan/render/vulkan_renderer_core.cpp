@@ -180,5 +180,5 @@ std::expected<VulkanRenderer, EngineError> VulkanRenderer::create(
     return {};
 }
 
-}  // namespace vanguard::render
+}  // namespace vanta::render
 

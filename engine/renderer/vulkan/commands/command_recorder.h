@@ -97,4 +97,4 @@ public:
     }
 };
 
-}  // namespace vanguard::render
+}  // namespace vanta::render

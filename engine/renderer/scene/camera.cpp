@@ -33,4 +33,4 @@ namespace vanta::scene {
     return state;
 }
 
-} // namespace vanguard::scene
+}  // namespace vanta::scene

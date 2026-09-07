@@ -43,4 +43,4 @@ namespace vanta::slang_generator {
         return out;
     }
 
-}  // namespace vanguard::slang_generator
+}  // namespace vanta::slang_generator

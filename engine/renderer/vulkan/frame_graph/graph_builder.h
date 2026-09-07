@@ -38,4 +38,4 @@ private:
     RenderGraphData graph_data_;
 };
 
-} // namespace vanguard::render::fg
+}  // namespace vanta::render::fg

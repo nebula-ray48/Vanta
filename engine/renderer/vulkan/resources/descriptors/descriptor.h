@@ -56,5 +56,5 @@ namespace vanta::render {
             VkDescriptorSetLayout layout) noexcept;
     };
 
-}  // namespace vanguard::render
+}  // namespace vanta::render
 

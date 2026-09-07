@@ -10,4 +10,4 @@ namespace vanta::render::fg {
     const RenderGraphData& graph_data
 ) noexcept;
 
-} // namespace vanguard::render::fg
+} // namespace vanta::render::fg

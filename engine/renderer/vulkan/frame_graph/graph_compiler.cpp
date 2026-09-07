@@ -118,4 +118,4 @@ inline void translate_usage_to_vulkan(
     return plan;
 }
 
-} // namespace vanguard::render::fg
+}  // namespace vanta::render::fg

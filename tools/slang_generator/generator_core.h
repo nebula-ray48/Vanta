@@ -58,4 +58,4 @@ namespace vanta::slang_generator {
         std::vector<uint32_t>    bindings;
     };
 
-}  // namespace vanguard::slang_generator
+}  // namespace vanta::slang_generator

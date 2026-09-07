@@ -91,4 +91,4 @@ namespace vanta::scene {
 
     [[nodiscard]] CameraData update_camera(const CameraData& old_camera, const InputState& input, float delta_time) noexcept;
 
-}  // namespace vanguard::scene
+}  // namespace vanta::scene

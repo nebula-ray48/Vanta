@@ -47,5 +47,5 @@ namespace vanta::render {
         uint32_t height
     );
 
-}  // namespace vanguard::render
+}  // namespace vanta::render
 

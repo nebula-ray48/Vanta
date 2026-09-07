@@ -59,4 +59,4 @@ namespace vanta::slang_generator {
         return result_bindings;
     }
 
-}  // namespace vanguard::slang_generator
+}  // namespace vanta::slang_generator

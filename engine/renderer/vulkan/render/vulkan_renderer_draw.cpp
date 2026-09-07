@@ -217,5 +217,5 @@ std::expected<void, EngineError> VulkanRenderer::end_frame(const ActiveFrame& ac
     return {};
 }
 
-}  // namespace vanguard::render
+}  // namespace vanta::render
 

@@ -205,5 +205,5 @@ namespace vanta::render {
     return ctx;
 }
 
-}  // namespace vanguard::render
+}  // namespace vanta::render
 

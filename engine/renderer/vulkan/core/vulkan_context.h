@@ -68,5 +68,5 @@ inline void GpuBuffer::destroy(const VulkanContext& context) noexcept {
     void* window_handle
 );
 
-}  // namespace vanguard::render
+}  // namespace vanta::render
 

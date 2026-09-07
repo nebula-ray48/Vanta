@@ -103,4 +103,4 @@ inline std::string to_string(const EngineError& error) {
     }, error);
 }
 
-}  // namespace vanguard::render
+}  // namespace vanta::render

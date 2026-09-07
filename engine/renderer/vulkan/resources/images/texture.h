@@ -10,7 +10,7 @@
 
 #include "assets/image_loader.hpp"
 
-namespace rey::vulkan {
+namespace vanta::vulkan {
 
     enum class VulkanError {
         ALLOCATION_FAILED,
@@ -63,5 +63,5 @@ namespace rey::vulkan {
     public:
         static void write_texture(VkDevice device, VkDescriptorSet set, uint32_t binding, uint32_t index, const Texture& texture);
     };
-} // namespace rey::vulkan
+}  // namespace vanta::vulkan
 

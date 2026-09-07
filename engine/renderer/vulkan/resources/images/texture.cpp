@@ -8,7 +8,7 @@
 #include <stdexcept>
 #include <cstring>
 
-namespace rey::vulkan {
+namespace vanta::vulkan {
 
 Texture::Texture(Texture&& other) noexcept
     : device(other.device), image(other.image), memory(other.memory),
@@ -249,5 +249,5 @@ std::expected<Texture, VulkanError> create_texture_from_image(
     vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 }
 
-} // namespace rey::vulkan
+}  // namespace vanta::vulkan
 

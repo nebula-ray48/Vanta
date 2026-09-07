@@ -26,6 +26,6 @@ namespace vanta::scene {
 
         return mesh;
     }
-}  // namespace vanguard::scene
+}  // namespace vanta::scene
 
 

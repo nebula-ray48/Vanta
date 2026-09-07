@@ -18,7 +18,7 @@ namespace vanta::render {
     namespace {
         void update_bindless_texture(
         VkDevice device, VkDescriptorSet bindless_set,
-        uint32_t binding, uint32_t index, const rey::vulkan::Texture& texture)
+        uint32_t binding, uint32_t index, const vanta::vulkan::Texture& texture)
         {
         const VkDescriptorImageInfo tex_info{
             .sampler = VK_NULL_HANDLE,
@@ -63,7 +63,7 @@ namespace vanta::render {
             return std::unexpected(EngineError{LegacyError{"テクスチャ画像のロードに失敗しました"}});
         }
 
-        auto texture_opt = rey::vulkan::create_texture_from_image(
+        auto texture_opt = vanta::vulkan::create_texture_from_image(
             context_.device,
             context_.physical_device,
             sync_.command_pool,
@@ -212,5 +212,5 @@ std::expected<MeshId, EngineError> VulkanRenderer::create_mesh_from_data(const M
     return mesh_id;
 }
 
-}  // namespace vanguard::render
+}  // namespace vanta::render
 

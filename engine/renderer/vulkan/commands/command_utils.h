@@ -22,4 +22,4 @@ namespace vanta::render {
         VkBuffer dst_buffer,
         VkDeviceSize size);
 
-} // namespace vanguard::render
+} // namespace vanta::render
