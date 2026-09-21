@@ -139,9 +139,10 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
 }
 
 std::expected<ActiveFrame, EngineError> VulkanRenderer::begin_frame() const {
-    const uint32_t frame = static_cast<uint32_t>(sync_.current_frame);
+    const uint32_t frame = current_frame_index_;
+    const FrameContext& frame_context = frames_[frame];
 
-    if (vkWaitForFences(context_.device, 1, &sync_.in_flight_fences[frame], VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
+    if (vkWaitForFences(context_.device, 1, &frame_context.completion_fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
         return std::unexpected(EngineError{LegacyError{"Fenceの待機に失敗"}});
     }
 
@@ -150,7 +151,7 @@ std::expected<ActiveFrame, EngineError> VulkanRenderer::begin_frame() const {
         context_.device,
         swapchain_target_.swapchain,
         UINT64_MAX,
-        sync_.image_available_semaphores[frame],
+        frame_context.image_available,
         VK_NULL_HANDLE,
         &image_index);
 
@@ -159,9 +160,9 @@ std::expected<ActiveFrame, EngineError> VulkanRenderer::begin_frame() const {
         return std::unexpected(EngineError{LegacyError{"画像の取得に失敗"}});
     }
 
-    vkResetFences(context_.device, 1, &sync_.in_flight_fences[frame]);
+    vkResetFences(context_.device, 1, &frame_context.completion_fence);
 
-    VkCommandBuffer cmd = sync_.command_buffers[frame];
+    VkCommandBuffer cmd = frame_context.graphics_command_buffer;
     vkResetCommandBuffer(cmd, 0);
 
     constexpr VkCommandBufferBeginInfo begin_info{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
@@ -181,10 +182,11 @@ std::expected<void, EngineError> VulkanRenderer::end_frame(const ActiveFrame& ac
         return std::unexpected(EngineError{LegacyError{"コマンドバッファの終了に失敗"}});
     }
 
-    VkSemaphore wait_semaphores[] = {sync_.image_available_semaphores[active_frame.frame_index]};
+    const FrameContext& frame_context = frames_[active_frame.frame_index];
+    VkSemaphore wait_semaphores[] = {frame_context.image_available};
     VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
     VkCommandBuffer command_buffers[] = {active_frame.recorder.command_buffer};
-    VkSemaphore signal_semaphores[] = {sync_.render_finished_semaphores[active_frame.image_index]};
+    VkSemaphore signal_semaphores[] = {frame_context.render_finished};
 
     const VkSubmitInfo submit_info{
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
@@ -197,7 +199,7 @@ std::expected<void, EngineError> VulkanRenderer::end_frame(const ActiveFrame& ac
         .pSignalSemaphores = signal_semaphores,
     };
 
-    if (vkQueueSubmit(context_.graphics_queue, 1, &submit_info, sync_.in_flight_fences[active_frame.frame_index]) != VK_SUCCESS) {
+    if (vkQueueSubmit(context_.graphics_queue, 1, &submit_info, frame_context.completion_fence) != VK_SUCCESS) {
         return std::unexpected(EngineError{LegacyError{"キューの送信に失敗"}});
     }
 
@@ -213,7 +215,7 @@ std::expected<void, EngineError> VulkanRenderer::end_frame(const ActiveFrame& ac
 
     vkQueuePresentKHR(context_.graphics_queue, &present_info);
 
-    sync_.current_frame = (active_frame.frame_index + 1) % MAX_FRAMES_IN_FLIGHT;
+    current_frame_index_ = (active_frame.frame_index + 1) % MAX_FRAMES_IN_FLIGHT;
     return {};
 }
 

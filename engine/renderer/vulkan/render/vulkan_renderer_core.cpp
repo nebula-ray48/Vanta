@@ -24,7 +24,7 @@ VulkanRenderer& VulkanRenderer::operator=(VulkanRenderer&& other) noexcept {
 
         context_ = other.context_;
         swapchain_target_ = std::move(other.swapchain_target_);
-        sync_ = std::move(other.sync_);
+        frames_ = std::move(other.frames_);
         meshes_ = std::move(other.meshes_);
         global_ubo_buffer_ = std::move(other.global_ubo_buffer_);
         descriptor_pool_ = other.descriptor_pool_;
@@ -63,9 +63,11 @@ VulkanRenderer::~VulkanRenderer() {
     }
     meshes_.clear();
 
+    for (auto& frame : frames_) {
+        frame.destroy(context_);
+    }
     swapchain_target_.destroy(context_.device);
     pipeline_.destroy(context_.device);
-    sync_.destroy(context_.device);
 
     global_ubo_buffer_.destroy(context_);
 
@@ -110,14 +112,12 @@ std::expected<VulkanRenderer, EngineError> VulkanRenderer::create(
     }
     renderer.swapchain_target_ = std::move(*swapchain);
 
-    auto sync = SyncContext::create(
-        renderer.context_.device,
-        renderer.context_.graphics_queue_family_index,
-        static_cast<uint32_t>(renderer.swapchain_target_.images.size()));
-    if (!sync) {
-        return std::unexpected(sync.error());
+    for (uint32_t index = 0; index < MAX_FRAMES_IN_FLIGHT; ++index) {
+        if (auto frame_result = renderer.frames_[index].initialize(renderer.context_, index);
+            !frame_result) {
+            return std::unexpected(frame_result.error());
+        }
     }
-    renderer.sync_ = std::move(*sync);
 
     constexpr VmaAllocationCreateInfo ubo_alloc_info{
         .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
@@ -157,7 +157,8 @@ std::expected<VulkanRenderer, EngineError> VulkanRenderer::create(
 
     size_t vertex_size = scene.vertices.size() * sizeof(scene.vertices[0]);
     auto vertex_res = upload_buffer_to_gpu(
-        context_.allocator, context_.device, sync_.command_pool, context_.graphics_queue,
+        context_.allocator, context_.device,
+        frames_[current_frame_index_].graphics_command_pool, context_.graphics_queue,
         vertex_size, scene.vertices.data(), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
     );
     if (!vertex_res.has_value()) {
@@ -167,7 +168,8 @@ std::expected<VulkanRenderer, EngineError> VulkanRenderer::create(
 
     size_t index_size = scene.indices.size() * sizeof(scene.indices[0]);
     auto index_res = upload_buffer_to_gpu(
-        context_.allocator, context_.device, sync_.command_pool, context_.graphics_queue,
+        context_.allocator, context_.device,
+        frames_[current_frame_index_].graphics_command_pool, context_.graphics_queue,
         index_size, scene.indices.data(), VK_BUFFER_USAGE_INDEX_BUFFER_BIT
     );
     if (!index_res.has_value()) {

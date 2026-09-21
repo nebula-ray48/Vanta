@@ -10,7 +10,6 @@ add_library(vanta_renderer STATIC
         include/generated/render_command_generated.h
         vulkan/commands/command_recorder.h
         include/engine_error.h
-        vulkan/core/sync_context.h
         vulkan/pipeline/pipeline.h
         vulkan/core/vulkan_context.h
         vulkan/render/swapchain_target.h
@@ -58,6 +57,10 @@ add_library(vanta_renderer STATIC
         vulkan/frame_graph/graph_executor.cpp
         vulkan/frame_graph/graph_builder.h
         vulkan/frame_graph/graph_builder.cpp
+        vulkan/render/vulkan_device.h
+        vulkan/render/swapchain_manager.h
+        vulkan/frame/frame_context.h
+        vulkan/frame/frame_context.cpp
 )
 
 target_include_directories(vanta_renderer PUBLIC

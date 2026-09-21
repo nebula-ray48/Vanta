@@ -9,16 +9,17 @@
 
 #include <expected>
 #include <vector>
+#include <array>
 
 #include "engine_error.h"
 #include "include/render_types.h"
 #include "vulkan/resources/buffers/vulkan_buffer_utils.h"
 #include "vulkan/commands/command_recorder.h"
-#include "vulkan/core/sync_context.h"
 #include "vulkan/resources/descriptors/descriptor.h"
 #include "vulkan/resources/images/texture.h"
 #include "vulkan/pipeline/pipeline.h"
 #include "vulkan//render/swapchain_target.h"
+#include "vulkan/frame/frame_context.h"
 
 namespace vanta::render {
 
@@ -69,7 +70,8 @@ namespace vanta::render {
         VulkanContext context_;
         SwapchainTarget swapchain_target_;
         GraphicsPipeline pipeline_;
-        SyncContext sync_;
+        std::array<FrameContext, MAX_FRAMES_IN_FLIGHT> frames_;
+        uint32_t current_frame_index_{0};
 
         std::vector<GpuMesh> meshes_;
 
@@ -91,6 +93,7 @@ namespace vanta::render {
 
         std::expected<void, EngineError> initialize_textures();
         std::vector<vanta::vulkan::Texture> textures_;
+        [[nodiscard]] FrameContext& current_frame() noexcept { return frames_[current_frame_index_]; }
 
         AllocatedBuffer vertex_buffer_;
         AllocatedBuffer index_buffer_;

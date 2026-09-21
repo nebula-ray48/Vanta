@@ -66,7 +66,7 @@ namespace vanta::render {
         auto texture_opt = vanta::vulkan::create_texture_from_image(
             context_.device,
             context_.physical_device,
-            sync_.command_pool,
+            frames_[current_frame_index_].graphics_command_pool,
             context_.graphics_queue,
             *image_data_opt
         );
@@ -185,7 +185,7 @@ std::expected<void, EngineError> VulkanRenderer::initialize_pipeline_resources()
 std::expected<MeshId, EngineError> VulkanRenderer::create_mesh_from_data(const MeshData& data) {
     auto vertex_buffer = create_device_local_buffer<Vertex>(
         context_,
-        sync_.command_pool,
+        frames_[current_frame_index_].graphics_command_pool,
         std::span(data.vertices),
         VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
     if (!vertex_buffer) {
@@ -194,7 +194,7 @@ std::expected<MeshId, EngineError> VulkanRenderer::create_mesh_from_data(const M
 
     auto index_buffer = create_device_local_buffer<uint32_t>(
         context_,
-        sync_.command_pool,
+        frames_[current_frame_index_].graphics_command_pool,
         std::span(data.indices),
         VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
     if (!index_buffer) {
