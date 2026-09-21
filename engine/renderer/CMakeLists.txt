@@ -61,6 +61,8 @@ add_library(vanta_renderer STATIC
         vulkan/render/swapchain_manager.h
         vulkan/frame/frame_context.h
         vulkan/frame/frame_context.cpp
+        vulkan/resources/resource_registry.h
+        vulkan/resources/resource_registry.cpp
 )
 
 target_include_directories(vanta_renderer PUBLIC
