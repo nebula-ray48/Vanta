@@ -25,6 +25,7 @@ namespace vanta::render {
         std::vector<VkImage> images;
         std::vector<VkImageView> image_views;
         std::vector<VkFramebuffer> framebuffers;
+        std::vector<VkSemaphore> render_finished_semaphores;
 
         VkFormat depth_format{VK_FORMAT_UNDEFINED};
         VkImage depth_image{VK_NULL_HANDLE};

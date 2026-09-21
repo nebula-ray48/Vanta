@@ -2,6 +2,10 @@ add_executable(vanta_engine_tests
         test_main.cpp
 )
 
+add_executable(vanta_frame_graph_tests
+        frame_graph_tests.cpp
+)
+
 find_package(glfw3 REQUIRED)
 find_package(GTest CONFIG REQUIRED)
 
@@ -13,6 +17,18 @@ target_include_directories(vanta_engine_tests PRIVATE
 
 target_link_libraries(vanta_engine_tests PRIVATE
         glfw
+        Vulkan::Vulkan
+        GTest::gtest
+        GTest::gtest_main
+        vanta_renderer
+)
+
+target_include_directories(vanta_frame_graph_tests PRIVATE
+        ${CMAKE_SOURCE_DIR}/engine/renderer
+        ${CMAKE_SOURCE_DIR}/engine/renderer/include
+)
+
+target_link_libraries(vanta_frame_graph_tests PRIVATE
         Vulkan::Vulkan
         GTest::gtest
         GTest::gtest_main
@@ -44,3 +60,4 @@ add_custom_command(TARGET vanta_engine_tests POST_BUILD
 )
 
 add_test(NAME CoreLogicTest COMMAND vanta_engine_tests)
+add_test(NAME FrameGraphTest COMMAND vanta_frame_graph_tests)

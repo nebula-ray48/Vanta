@@ -186,7 +186,9 @@ std::expected<void, EngineError> VulkanRenderer::end_frame(const ActiveFrame& ac
     VkSemaphore wait_semaphores[] = {frame_context.image_available};
     VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
     VkCommandBuffer command_buffers[] = {active_frame.recorder.command_buffer};
-    VkSemaphore signal_semaphores[] = {frame_context.render_finished};
+    VkSemaphore signal_semaphores[] = {
+        swapchain_target_.render_finished_semaphores[active_frame.image_index]
+    };
 
     const VkSubmitInfo submit_info{
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,

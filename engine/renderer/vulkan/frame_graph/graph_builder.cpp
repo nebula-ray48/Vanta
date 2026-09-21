@@ -2,6 +2,49 @@
 
 namespace vanta::render::fg {
 
+ImageHandle RenderGraphBuilder::create_image(const ImageDescription& description) noexcept {
+    const ImageHandle handle{
+        .id = static_cast<uint32_t>(graph_data_.images.size()),
+        .generation = 1,
+    };
+    graph_data_.images.push_back(ImageResource{
+        .handle = handle,
+        .description = description,
+        .image = VK_NULL_HANDLE,
+        .initial_usage = UsageType::PRESENT,
+    });
+    return handle;
+}
+
+ImageHandle RenderGraphBuilder::import_image(
+    VkImage image,
+    const ImageDescription& description,
+    UsageType initial_usage) noexcept {
+    const ImageHandle handle{
+        .id = static_cast<uint32_t>(graph_data_.images.size()),
+        .generation = 1,
+    };
+    graph_data_.images.push_back(ImageResource{
+        .handle = handle,
+        .description = description,
+        .image = image,
+        .initial_usage = initial_usage,
+    });
+    return handle;
+}
+
+BufferHandle RenderGraphBuilder::create_buffer(const BufferDescription& description) noexcept {
+    const BufferHandle handle{
+        .id = static_cast<uint32_t>(graph_data_.buffers.size()),
+        .generation = 1,
+    };
+    graph_data_.buffers.push_back(BufferResource{
+        .handle = handle,
+        .description = description,
+    });
+    return handle;
+}
+
 PassBuilder& PassBuilder::read_image(ImageHandle handle, UsageType usage) noexcept {
     graph_.all_read_images.push_back(PassResource{handle, usage});
     pass_.read_images_count++;

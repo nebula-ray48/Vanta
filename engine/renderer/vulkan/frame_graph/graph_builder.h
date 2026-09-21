@@ -28,6 +28,13 @@ class RenderGraphBuilder {
 public:
     RenderGraphBuilder() noexcept = default;
 
+    [[nodiscard]] ImageHandle create_image(const ImageDescription& description) noexcept;
+    [[nodiscard]] ImageHandle import_image(
+        VkImage image,
+        const ImageDescription& description,
+        UsageType initial_usage = UsageType::PRESENT) noexcept;
+    [[nodiscard]] BufferHandle create_buffer(const BufferDescription& description) noexcept;
+
     PassBuilder add_pass(std::string_view name) noexcept;
 
     [[nodiscard]] RenderGraphData build() noexcept {

@@ -413,6 +413,22 @@ std::expected<SwapchainTarget, EngineError> create_swapchain_target(
         context.device, *render_pass, sc->extent, *views, depth->view);
     if (!framebuffers) { return std::unexpected(framebuffers.error()); }
 
+    std::vector<VkSemaphore> render_finished_semaphores;
+    render_finished_semaphores.reserve(images->size());
+    const VkSemaphoreCreateInfo semaphore_info{
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+    };
+    for (size_t index = 0; index < images->size(); ++index) {
+        VkSemaphore semaphore{VK_NULL_HANDLE};
+        if (vkCreateSemaphore(context.device, &semaphore_info, nullptr, &semaphore) != VK_SUCCESS) {
+            for (const VkSemaphore created : render_finished_semaphores) {
+                vkDestroySemaphore(context.device, created, nullptr);
+            }
+            return std::unexpected(LegacyError("Failed to create swapchain render-finished semaphore"));
+        }
+        render_finished_semaphores.push_back(semaphore);
+    }
+
     return SwapchainTarget{
         .swapchain = sc->swapchain,
         .format = sc->format,
@@ -420,6 +436,7 @@ std::expected<SwapchainTarget, EngineError> create_swapchain_target(
         .images = std::move(*images),
         .image_views = std::move(*views),
         .framebuffers = std::move(*framebuffers),
+        .render_finished_semaphores = std::move(render_finished_semaphores),
         .depth_format = depth->format,
         .depth_image = depth->image,
         .depth_image_memory = depth->memory,
@@ -429,6 +446,9 @@ std::expected<SwapchainTarget, EngineError> create_swapchain_target(
 }
 
 void SwapchainTarget::destroy(const VkDevice device) const noexcept {
+    for (const VkSemaphore semaphore : render_finished_semaphores) {
+        vkDestroySemaphore(device, semaphore, nullptr);
+    }
     for (auto&& [view, fb] : std::views::zip(image_views, framebuffers)) {
         vkDestroyFramebuffer(device, fb, nullptr);
         vkDestroyImageView(device, view, nullptr);

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vulkan/vulkan.h>
+#include <cstdint>
 #include <expected>
 #include <string_view>
 #include <vector>
@@ -12,14 +13,25 @@
 
 namespace vanta::render::fg {
 
-struct ImageHandle { uint32_t id; };
-struct BufferHandle { uint32_t id; };
+struct ImageHandle {
+    uint32_t id{0};
+    uint32_t generation{0};
+};
+
+struct BufferHandle {
+    uint32_t id{0};
+    uint32_t generation{0};
+};
 
 struct ImageDescription {
     uint32_t width = 0;
     uint32_t height = 0;
     VkFormat format = VK_FORMAT_UNDEFINED;
     // 影の場合は VK_FORMAT_D32_SFLOAT などを指定します
+};
+
+struct BufferDescription {
+    VkDeviceSize size{0};
 };
 
 enum class UsageType : std::uint8_t {
@@ -69,12 +81,28 @@ struct PassData {
 
 struct ExecutionPlan {
     std::vector<PassData> sorted_passes;
-    // std::vector<VkImageMemoryBarrier2> barriers; など
+    std::vector<uint32_t> sorted_pass_indices;
+    std::vector<std::vector<VkImageMemoryBarrier2>> barriers_per_pass;
+};
+
+struct ImageResource {
+    ImageHandle handle;
+    ImageDescription description;
+    VkImage image{VK_NULL_HANDLE};
+    UsageType initial_usage;
+};
+
+struct BufferResource {
+    BufferHandle handle;
+    BufferDescription description;
 };
 
 struct RenderGraphData {
     std::vector<PassData> passes;
     std::vector<std::string_view> pass_names;
+
+    std::vector<ImageResource> images;
+    std::vector<BufferResource> buffers;
 
     // ImageHandle ではなく PassResource を敷き詰める
     std::vector<PassResource> all_read_images;
