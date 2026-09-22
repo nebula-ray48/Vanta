@@ -4,12 +4,14 @@
 #include <cstdint>
 #include <expected>
 #include <string_view>
+#include <variant>
 #include <vector>
 #include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
 #include <glm/mat4x4.hpp>
 
 #include "engine_error.h"
+#include "vulkan/resources/resource_registry.h"
 
 namespace vanta::render::fg {
 
@@ -35,18 +37,26 @@ struct BufferDescription {
 };
 
 enum class UsageType : std::uint8_t {
-    READ_TEXTURE,
-    WRITE_DEPTH,
-    WRITE_COLOR,
-    PRESENT,
+    Undefined,
+    ColorAttachment,
+    DepthAttachment,
+    ShaderRead,
+    ShaderWrite,
+    TransferSrc,
+    TransferDst,
+    Present,
+    ComputeRead,
+    ComputeWrite,
 
-    // コンピュートシェーダー（アニメーションのGPU計算など）
-    COMPUTE_READ,
-    COMPUTE_WRITE,
-
-    // データのコピー（画像の読み込み時など）
-    TRANSFER_SRC, // コピー元
-    TRANSFER_DST, // コピー先
+    // Legacy names retained while call sites migrate to the canonical names.
+    READ_TEXTURE = ShaderRead,
+    WRITE_DEPTH = DepthAttachment,
+    WRITE_COLOR = ColorAttachment,
+    PRESENT = Present,
+    COMPUTE_READ = ComputeRead,
+    COMPUTE_WRITE = ComputeWrite,
+    TRANSFER_SRC = TransferSrc,
+    TRANSFER_DST = TransferDst,
 };
 
 struct PassResource {
@@ -79,17 +89,31 @@ struct PassData {
     ExecuteFunc execute = nullptr;
 };
 
+struct ResourceBarrier {
+    std::variant<ImageHandle, BufferHandle> resource;
+
+    UsageType before;
+    UsageType after;
+
+    VkPipelineStageFlags2 src_stage;
+    VkPipelineStageFlags2 dst_stage;
+    VkAccessFlags2 src_access;
+    VkAccessFlags2 dst_access;
+    VkImageLayout old_layout;
+    VkImageLayout new_layout;
+};
+
 struct ExecutionPlan {
     std::vector<PassData> sorted_passes;
     std::vector<uint32_t> sorted_pass_indices;
-    std::vector<std::vector<VkImageMemoryBarrier2>> barriers_per_pass;
+    std::vector<std::vector<ResourceBarrier>> barriers_per_pass;
 };
 
 struct ImageResource {
     ImageHandle handle;
     ImageDescription description;
     VkImage image{VK_NULL_HANDLE};
-    UsageType initial_usage;
+    UsageType initial_usage{UsageType::Undefined};
 };
 
 struct BufferResource {

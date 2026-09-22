@@ -11,7 +11,7 @@ ImageHandle RenderGraphBuilder::create_image(const ImageDescription& description
         .handle = handle,
         .description = description,
         .image = VK_NULL_HANDLE,
-        .initial_usage = UsageType::PRESENT,
+        .initial_usage = UsageType::Undefined,
     });
     return handle;
 }
