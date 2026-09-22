@@ -65,7 +65,8 @@ namespace vanta::render {
     VkPhysicalDeviceVulkan13Features vk13_features{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
         .pNext = &vk12_features,
-        .dynamicRendering = VK_TRUE
+        .synchronization2 = VK_TRUE,
+        .dynamicRendering = VK_TRUE,
     };
 
     VkInstanceCreateInfo const create_info{

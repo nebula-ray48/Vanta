@@ -129,4 +129,21 @@ VkImage ResourceRegistry::get_vk_image(ImageHandle handle) const noexcept {
     return vk_images_[handle.index];
 }
 
+VkImageView ResourceRegistry::get_vk_image_view(ImageHandle handle) const noexcept {
+    if (!handle.is_valid() || handle.index >= vk_image_views_.size() ||
+        image_generations_[handle.index] != handle.generation) {
+        return VK_NULL_HANDLE;
+    }
+    return vk_image_views_[handle.index];
+}
+
+const ImageDescription& ResourceRegistry::get_image_desc(ImageHandle handle) const noexcept {
+    static const ImageDescription invalid_description{};
+    if (!handle.is_valid() || handle.index >= image_descs_.size() ||
+        image_generations_[handle.index] != handle.generation) {
+        return invalid_description;
+    }
+    return image_descs_[handle.index];
+}
+
 }

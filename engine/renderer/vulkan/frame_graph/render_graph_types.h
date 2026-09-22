@@ -3,6 +3,7 @@
 #include <vulkan/vulkan.h>
 #include <cstdint>
 #include <expected>
+#include <functional>
 #include <string_view>
 #include <variant>
 #include <vector>
@@ -85,7 +86,7 @@ struct PassData {
     uint32_t write_buffers_offset = 0;
     uint32_t write_buffers_count = 0;
 
-    using ExecuteFunc = void(*)(VkCommandBuffer);
+    using ExecuteFunc = std::function<void(VkCommandBuffer)>;
     ExecuteFunc execute = nullptr;
 };
 

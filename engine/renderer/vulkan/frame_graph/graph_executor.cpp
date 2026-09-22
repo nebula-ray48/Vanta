@@ -1,36 +1,96 @@
 #include "graph_executor.h"
 
+#include <variant>
+#include <vector>
+
 namespace vanta::render::fg {
 
-std::expected<void, EngineError> execute_graph(
-    const ExecutionPlan& plan,
-    const ExecutionContext& context
-) noexcept {
-    // コマンドバッファが空の場合はエラーとして処理を中断する
-    if (context.cmd_buffer == VK_NULL_HANDLE) {
-        return std::unexpected(LegacyError("コマンドバッファが空です"));
-    }
+namespace {
 
-    // 事前に順番が整理されたパス（描画や計算の命令）を最初から最後まで順番に実行する
-    for (const auto& pass : plan.sorted_passes) {
-
-        // ==========================================
-        // TODO: ここでメモリバリア（画像やバッファの同期）の命令をVulkanに積む
-        //
-        // 理想的な設計（データ指向）では、この実行処理の中で複雑な計算は行いません。
-        // あらかじめ ExecutionPlan を作る段階で VkImageMemoryBarrier2 などの
-        // 構造体の配列を計算して用意しておき、ここでは vkCmdPipelineBarrier2 を
-        // 使ってその配列をそのままVulkanに渡すだけの処理にします。
-        // ==========================================
-
-        // パスの中身（実際の描画や計算の関数）が設定されていれば実行する
-        if (pass.execute != nullptr) {
-            pass.execute(context.cmd_buffer);
-        }
-    }
-
-    // すべての処理が正常にコマンドバッファに記録された場合は成功を返す
-    return {};
+::vanta::render::ImageHandle to_registry_handle(ImageHandle handle) noexcept {
+	return ::vanta::render::ImageHandle{
+		.index = handle.id,
+		.generation = handle.generation,
+	};
 }
 
-}  // namespace vanta::render::fg
+} // namespace
+
+void GraphExecutor::issue_barriers(
+	VkCommandBuffer cmd,
+	const std::vector<ResourceBarrier>& barriers,
+	const ResourceRegistry& registry) const noexcept {
+	std::vector<VkImageMemoryBarrier2> image_barriers;
+	image_barriers.reserve(barriers.size());
+
+	for (const ResourceBarrier& barrier : barriers) {
+		if (!std::holds_alternative<ImageHandle>(barrier.resource)) {
+			continue;
+		}
+
+		const ImageHandle image_handle = std::get<ImageHandle>(barrier.resource);
+		const VkImage image = registry.get_vk_image(to_registry_handle(image_handle));
+		if (image == VK_NULL_HANDLE) {
+			continue;
+		}
+
+		image_barriers.push_back(VkImageMemoryBarrier2{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+			.srcStageMask = barrier.src_stage,
+			.srcAccessMask = barrier.src_access,
+			.dstStageMask = barrier.dst_stage,
+			.dstAccessMask = barrier.dst_access,
+			.oldLayout = barrier.old_layout,
+			.newLayout = barrier.new_layout,
+			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.image = image,
+			.subresourceRange = {
+				barrier.after == UsageType::DepthAttachment
+					? VK_IMAGE_ASPECT_DEPTH_BIT
+					: VK_IMAGE_ASPECT_COLOR_BIT,
+				0, 1, 0, 1,
+			},
+		});
+	}
+
+	if (image_barriers.empty()) {
+		return;
+	}
+
+	const VkDependencyInfo dependency_info{
+		.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+		.imageMemoryBarrierCount = static_cast<uint32_t>(image_barriers.size()),
+		.pImageMemoryBarriers = image_barriers.data(),
+	};
+	vkCmdPipelineBarrier2(cmd, &dependency_info);
+}
+
+std::expected<void, std::string> GraphExecutor::execute(
+	VkCommandBuffer cmd,
+	const ExecutionPlan& plan,
+	const RenderGraphData& graph_data,
+	const ResourceRegistry& registry) const noexcept {
+	if (cmd == VK_NULL_HANDLE) {
+		return std::unexpected("Frame graph command buffer is null");
+	}
+	if (plan.sorted_passes.size() != plan.barriers_per_pass.size()) {
+		return std::unexpected("Frame graph execution plan has mismatched pass and barrier counts");
+	}
+	if (plan.sorted_passes.size() != plan.sorted_pass_indices.size()) {
+		return std::unexpected("Frame graph execution plan has mismatched pass indices");
+	}
+
+	for (size_t pass_index = 0; pass_index < plan.sorted_passes.size(); ++pass_index) {
+		issue_barriers(cmd, plan.barriers_per_pass[pass_index], registry);
+		const PassData& pass = plan.sorted_passes[pass_index];
+		if (pass.execute) {
+			pass.execute(cmd);
+		}
+	}
+
+	(void)graph_data;
+	return {};
+}
+
+} // namespace vanta::render::fg

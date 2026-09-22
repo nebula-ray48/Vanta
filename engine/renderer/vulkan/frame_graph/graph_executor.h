@@ -1,20 +1,29 @@
 #pragma once
-
+#include "vulkan/frame_graph/graph_compiler.h"
+#include "vulkan/resources/resource_registry.h"
 #include <vulkan/vulkan.h>
 #include <expected>
-#include "render_graph_types.h"
-#include "engine_error.h"
+#include <string>
 
 namespace vanta::render::fg {
 
-struct ExecutionContext {
-    VkCommandBuffer cmd_buffer;
-    // TODO 将来的には、ここに「今のフレームの仮想IDと実際のVkImageの紐付け表」などを追加します
+class GraphExecutor {
+public:
+    // コンパイラが生成した計画と、リソースの実体を管理するレジストリを受け取る
+    [[nodiscard]] std::expected<void, std::string> execute(
+        VkCommandBuffer cmd,
+        const ExecutionPlan& plan,
+        const RenderGraphData& graph_data,
+        const ResourceRegistry& registry
+    ) const noexcept;
+
+private:
+    // 抽象バリア (ResourceBarrier) を Vulkan の VkImageMemoryBarrier2 に変換して発行する
+    void issue_barriers(
+        VkCommandBuffer cmd,
+        const std::vector<ResourceBarrier>& barriers,
+        const ResourceRegistry& registry
+    ) const noexcept;
 };
 
-[[nodiscard]] std::expected<void, EngineError> execute_graph(
-    const ExecutionPlan& plan,
-    const ExecutionContext& context
-) noexcept;
-
-}  // namespace vanta::render::fg
+} // namespace vanta::render::fg

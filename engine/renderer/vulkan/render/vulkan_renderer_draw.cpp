@@ -6,6 +6,10 @@
 #include <array>
 
 #include "vulkan/resources/buffers/buffer.h"
+#include "vulkan/frame_graph/graph_builder.h"
+#include "vulkan/frame_graph/graph_compiler.h"
+#include "vulkan/frame_graph/graph_executor.h"
+#include "vulkan/resources/resource_registry.h"
 #include "vulkan_renderer.h"
 
 namespace vanta::render {
@@ -25,114 +29,123 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
     }
 
     ActiveFrame active_frame = *active_frame_opt;
-    CommandRecorder& recorder = active_frame.recorder;
-    VkCommandBuffer cmd = recorder.command_buffer;
-
     if (auto res = update_buffer_data(context_, global_ubo_buffer_, build_global_ubo(snapshot)); !res) {
         return std::unexpected(res.error());
     }
 
-    VkImageMemoryBarrier render_barrier{
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .srcAccessMask = 0,
-        .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-        .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = swapchain_target_.images[active_frame.image_index],
-        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
-    };
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr, 1, &render_barrier);
+    fg::RenderGraphBuilder graph_builder;
+    const uint32_t image_index = active_frame.image_index;
+    const fg::ImageHandle swapchain_image = graph_builder.import_image(
+        swapchain_target_.images[active_frame.image_index],
+        fg::ImageDescription{
+            .width = swapchain_target_.extent.width,
+            .height = swapchain_target_.extent.height,
+            .format = swapchain_target_.format,
+        },
+        fg::UsageType::Undefined);
 
-    VkRenderingAttachmentInfo color_attachment{
-        .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-        .imageView = swapchain_target_.image_views[active_frame.image_index],
-        .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-        .clearValue = {{{0.0f, 0.0f, 1.0f, 1.0f}}}
-    };
+    graph_builder.add_pass("MainColorPass")
+        .write_image(swapchain_image, fg::UsageType::ColorAttachment)
+        .execute([this, &snapshot, image_index](VkCommandBuffer cmd) {
+            VkRenderingAttachmentInfo color_attachment{
+                .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                .imageView = swapchain_target_.image_views[image_index],
+                .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                .clearValue = {{{0.0f, 0.0f, 1.0f, 1.0f}}},
+            };
+            const VkRenderingInfo rendering_info{
+                .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+                .renderArea = {.offset = {0, 0}, .extent = swapchain_target_.extent},
+                .layerCount = 1,
+                .colorAttachmentCount = 1,
+                .pColorAttachments = &color_attachment,
+                .pDepthAttachment = nullptr,
+            };
 
-    VkRenderingInfo rendering_info{
-        .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-        .renderArea = {.offset = {0, 0}, .extent = swapchain_target_.extent},
-        .layerCount = 1,
-        .colorAttachmentCount = 1,
-        .pColorAttachments = &color_attachment,
-        .pDepthAttachment = nullptr
-    };
+            vkCmdBeginRendering(cmd, &rendering_info);
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_.pipeline);
 
-    vkCmdBeginRendering(cmd, &rendering_info);
+            const VkViewport viewport{
+                .x = 0.0f,
+                .y = 0.0f,
+                .width = static_cast<float>(swapchain_target_.extent.width),
+                .height = static_cast<float>(swapchain_target_.extent.height),
+                .minDepth = 0.0f,
+                .maxDepth = 1.0f,
+            };
+            vkCmdSetViewport(cmd, 0, 1, &viewport);
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_.pipeline);
+            const VkRect2D scissor{
+                .offset = {0, 0},
+                .extent = swapchain_target_.extent,
+            };
+            vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = static_cast<float>(swapchain_target_.extent.width);
-    viewport.height = static_cast<float>(swapchain_target_.extent.height);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(cmd, 0, 1, &viewport);
+            std::array<VkDescriptorSet, 2> bound_sets = {
+                global_ubo_set_,
+                global_bindless_set_,
+            };
+            vkCmdBindDescriptorSets(
+                cmd,
+                VK_PIPELINE_BIND_POINT_GRAPHICS,
+                pipeline_.layout,
+                0,
+                static_cast<uint32_t>(bound_sets.size()),
+                bound_sets.data(),
+                0,
+                nullptr);
 
-    VkRect2D scissor{};
-    scissor.offset = {0, 0};
-    scissor.extent = swapchain_target_.extent;
-    vkCmdSetScissor(cmd, 0, 1, &scissor);
+            for (const auto& instance : snapshot.instances) {
+                vkCmdPushConstants(cmd, pipeline_.layout, VK_SHADER_STAGE_VERTEX_BIT, 0,
+                                   sizeof(glm::mat4), &instance.model_matrix);
+                if (instance.mesh_id.value < meshes_.size()) {
+                    const auto& mesh = meshes_[instance.mesh_id.value];
+                    VkBuffer vertex_buffers[] = {mesh.vertex_buffer.buffer};
+                    VkDeviceSize offsets[] = {0};
+                    vkCmdBindVertexBuffers(cmd, 0, 1, vertex_buffers, offsets);
+                    vkCmdBindIndexBuffer(cmd, mesh.index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+                    vkCmdDrawIndexed(cmd, mesh.index_count, 1, 0, 0, 0);
+                }
+            }
 
-    std::array<VkDescriptorSet, 2> bound_sets = {
-        global_ubo_set_,
-        global_bindless_set_,
-    };
+            vkCmdEndRendering(cmd);
 
-    vkCmdBindDescriptorSets(
-        cmd,
-        VK_PIPELINE_BIND_POINT_GRAPHICS,
-        pipeline_.layout,
-        0,
-        static_cast<uint32_t>(bound_sets.size()),
-        bound_sets.data(),
-        0,
-        nullptr
-    );
+            if (vertex_buffer_.buffer != VK_NULL_HANDLE && index_count_ > 0) {
+                VkDeviceSize offsets[] = {0};
+                vkCmdBindVertexBuffers(cmd, 0, 1, &vertex_buffer_.buffer, offsets);
+                vkCmdBindIndexBuffer(cmd, index_buffer_.buffer, 0, VK_INDEX_TYPE_UINT32);
+                vkCmdDrawIndexed(cmd, index_count_, 1, 0, 0, 0);
+            }
+        });
 
-    for (const auto& instance : snapshot.instances) {
-        vkCmdPushConstants(cmd, pipeline_.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &instance.model_matrix);
+    graph_builder.add_pass("PresentPass")
+        .read_image(swapchain_image, fg::UsageType::Present);
 
-        if (instance.mesh_id.value < meshes_.size()) {
-            const auto& mesh = meshes_[instance.mesh_id.value];
-            VkBuffer vertex_buffers[] = {mesh.vertex_buffer.buffer};
-            VkDeviceSize offsets[] = {0};
-            vkCmdBindVertexBuffers(cmd, 0, 1, vertex_buffers, offsets);
-            vkCmdBindIndexBuffer(cmd, mesh.index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-            vkCmdDrawIndexed(cmd, mesh.index_count, 1, 0, 0, 0);
-        }
+    const fg::RenderGraphData graph_data = graph_builder.build();
+    const auto plan = fg::compile_graph(graph_data);
+    if (!plan) {
+        return std::unexpected(EngineError{LegacyError(to_string(plan.error()))});
     }
 
-    vkCmdEndRendering(cmd);
+    ResourceRegistry registry;
+    registry.register_imported_image(
+        swapchain_target_.images[active_frame.image_index],
+        swapchain_target_.image_views[active_frame.image_index],
+        render::ImageDescription{
+            .width = swapchain_target_.extent.width,
+            .height = swapchain_target_.extent.height,
+            .format = swapchain_target_.format,
+            .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+            .ownership = ResourceOwnership::IMPORTED,
+        });
 
-    VkImageMemoryBarrier present_barrier{
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-        .dstAccessMask = 0,
-        .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = swapchain_target_.images[active_frame.image_index],
-        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
-    };
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &present_barrier);
-
-    if (vertex_buffer_.buffer != VK_NULL_HANDLE && index_count_ > 0) {
-
-        VkDeviceSize offsets[] = {0};
-        vkCmdBindVertexBuffers(active_frame.recorder.command_buffer, 0, 1, &vertex_buffer_.buffer, offsets);
-
-        vkCmdBindIndexBuffer(active_frame.recorder.command_buffer, index_buffer_.buffer, 0, VK_INDEX_TYPE_UINT32);
-
-        vkCmdDrawIndexed(active_frame.recorder.command_buffer, index_count_, 1, 0, 0, 0);
+    fg::GraphExecutor executor;
+    const auto execute_result = executor.execute(
+        active_frame.recorder.command_buffer, *plan, graph_data, registry);
+    if (!execute_result) {
+        return std::unexpected(EngineError{LegacyError(execute_result.error())});
     }
 
     return end_frame(active_frame);
