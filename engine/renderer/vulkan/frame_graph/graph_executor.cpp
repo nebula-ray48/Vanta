@@ -39,7 +39,7 @@ void GraphExecutor::issue_barriers(
 	            continue;
 	        }
 
-	        image_barriers.push_back(VｄkImageMemoryBarrier2{
+	        image_barriers.push_back(VkImageMemoryBarrier2{
                 .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
                 .srcStageMask = barrier.src_stage,
                 .srcAccessMask = barrier.src_access,
