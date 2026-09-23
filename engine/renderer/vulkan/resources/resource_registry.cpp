@@ -1,4 +1,5 @@
 #include "vulkan/resources/resource_registry.h"
+#include "vulkan/utils/vulkan_format_utils.h"
 #include "include/ext/vk_mem_alloc.h"
 
 namespace vanta::render {
@@ -39,8 +40,22 @@ struct VulkanContext {
         return std::unexpected("VMAによる画像の作成に失敗しました。");
     }
 
-    // TODO: ここで VkImageView も作成して vk_image_views_ に保存する処理を追加します。
+    VkImageViewCreateInfo view_info{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    view_info.image = new_image;
+    view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    view_info.format = desc.format;
+    view_info.subresourceRange.aspectMask = ::vanta::render::get_image_aspect_mask(desc.format);
+    view_info.subresourceRange.baseMipLevel = 0;
+    view_info.subresourceRange.levelCount = desc.mip_levels > 0 ? desc.mip_levels : 1;
+    view_info.subresourceRange.baseArrayLayer = 0;
+    view_info.subresourceRange.layerCount = desc.array_layers > 0 ? desc.array_layers : 1;
+
     VkImageView new_view = VK_NULL_HANDLE;
+    if (vkCreateImageView(ctx.device, &view_info, nullptr, &new_view) != VK_SUCCESS) {
+        // 画像は作れたがViewが作れなかった場合はロールバック
+        vmaDestroyImage(ctx.allocator, new_image, new_allocation);
+        return std::unexpected("VkImageViewの作成に失敗しました。");
+    }
 
     ImageHandle handle;
 

@@ -1,4 +1,5 @@
 #include "graph_executor.h"
+#include "vulkan/utils/vulkan_format_utils.h"
 
 #include <variant>
 #include <vector>
@@ -34,10 +35,14 @@ void GraphExecutor::issue_barriers(
 	for (const ResourceBarrier& barrier : barriers) {
 	    if (std::holds_alternative<ImageHandle>(barrier.resource)) {
 	        const ImageHandle image_handle = std::get<ImageHandle>(barrier.resource);
-	        const VkImage image = registry.get_vk_image(to_registry_handle(image_handle));
+	        const auto reg_handle = to_registry_handle(image_handle);
+	        const VkImage image = registry.get_vk_image(reg_handle);
 	        if (image == VK_NULL_HANDLE) {
 	            continue;
 	        }
+
+	        const auto& desc = registry.get_image_desc(reg_handle);
+	        const VkImageAspectFlags aspect_mask = ::vanta::render::get_image_aspect_mask(desc.format);
 
 	        image_barriers.push_back(VkImageMemoryBarrier2{
                 .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
@@ -51,10 +56,9 @@ void GraphExecutor::issue_barriers(
                 .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                 .image = image,
                 .subresourceRange = {
-                    barrier.after == UsageType::DepthAttachment
-                        ? VK_IMAGE_ASPECT_DEPTH_BIT
-                        : VK_IMAGE_ASPECT_COLOR_BIT,
-                    0, 1, 0, 1,
+                    aspect_mask,
+                    0, desc.mip_levels > 0 ? desc.mip_levels : 1,
+                    0, desc.array_layers > 0 ? desc.array_layers : 1,
                 },
             });
 	    } else if (std::holds_alternative<BufferHandle>(barrier.resource)) {

@@ -29,8 +29,13 @@ void translate_usage_to_sync_state(
         case UsageType::DepthAttachment:
             stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
                     VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
-            access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+            access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
             layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+            break;
+        case UsageType::DepthRead:
+            stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+            access = VK_ACCESS_2_SHADER_READ_BIT;
+            layout = VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL;
             break;
         case UsageType::ShaderRead:
             stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;

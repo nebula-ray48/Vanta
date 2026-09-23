@@ -41,6 +41,7 @@ enum class UsageType : std::uint8_t {
     Undefined,
     ColorAttachment,
     DepthAttachment,
+    DepthRead,
     ShaderRead,
     ShaderWrite,
     TransferSrc,
@@ -51,6 +52,7 @@ enum class UsageType : std::uint8_t {
 
     // Legacy names retained while call sites migrate to the canonical names.
     READ_TEXTURE = ShaderRead,
+    READ_DEPTH = DepthRead,
     WRITE_DEPTH = DepthAttachment,
     WRITE_COLOR = ColorAttachment,
     PRESENT = Present,
