@@ -6,7 +6,7 @@
 #include <iostream>
 #include <utility>
 
-#include "scene/gltf_loader.h"
+#include "assets/gltf_loader.h"
 #include "vulkan/resources/buffers/buffer.h"
 #include "vulkan_renderer.h"
 

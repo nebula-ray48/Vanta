@@ -13,7 +13,7 @@
 
 #include "include/ext/vk_mem_alloc.h"
 #include "vulkan/core/vulkan_context.h"
-#include "include/engine_error.h"
+#include "engine_error.h"
 
 namespace vanta::render {
     struct GpuBuffer;

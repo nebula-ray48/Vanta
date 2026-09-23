@@ -1,5 +1,5 @@
 #include <GLFW/glfw3.h>
-#include "scene/camera.h"
+#include "world/scene/camera.h"
 
 namespace vanta::scene {
 

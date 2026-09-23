@@ -9,7 +9,7 @@
 #include <glm/glm.hpp>
 #include <expected>
 
-#include "include/engine_error.h"
+#include "engine_error.h"
 #include "vulkan/core/vulkan_context.h"
 
 namespace vanta::render {

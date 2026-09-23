@@ -12,7 +12,7 @@
 #include <array>
 
 #include "engine_error.h"
-#include "include/render_types.h"
+#include "render_types.h"
 #include "vulkan/resources/buffers/vulkan_buffer_utils.h"
 #include "vulkan/commands/command_recorder.h"
 #include "vulkan/resources/descriptors/descriptor.h"

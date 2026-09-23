@@ -20,7 +20,7 @@ target_link_libraries(vanta_engine_tests PRIVATE
         Vulkan::Vulkan
         GTest::gtest
         GTest::gtest_main
-        vanta_renderer
+        vanta_engine
 )
 
 target_include_directories(vanta_frame_graph_tests PRIVATE
@@ -32,7 +32,7 @@ target_link_libraries(vanta_frame_graph_tests PRIVATE
         Vulkan::Vulkan
         GTest::gtest
         GTest::gtest_main
-        vanta_renderer
+        vanta_engine
 )
 
 if(APPLE)

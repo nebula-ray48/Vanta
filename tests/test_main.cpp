@@ -9,13 +9,13 @@
 #include <string>
 #include <variant>
 
-#include "../renderer/include/ext/glfw3.h"
+#include "../render/include/ext/glfw3.h"
 
 #include "engine_error.h"
-#include "include/render_types.h"
-#include "scene/camera.h"
-#include "scene/mesh.h"
-#include "vulkan/render/vulkan_renderer.h"
+#include "render_types.h"
+#include "world/scene/camera.h"
+#include "world/scene/mesh.h"
+#include "render/vulkan/render/vulkan_renderer.h"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -57,21 +57,21 @@ int main() {
     std::cout << "ウィンドウを作成しました。VulkanRenderer を初期化します...\n";
 
     try {
-        auto renderer_expected = vanta::render::VulkanRenderer::create(
+        auto render_expected = vanta::render::VulkanRenderer::create(
             "Rey Engine Test",
             window,
             kWindowWidth,
             kWindowHeight);
 
-        if (!renderer_expected) {
-            throw std::runtime_error("レンダラー初期化エラー: " + describe_error(renderer_expected.error()));
+        if (!render_expected) {
+            throw std::runtime_error("レンダラー初期化エラー: " + describe_error(render_expected.error()));
         }
 
-        auto renderer = std::move(renderer_expected.value());
+        auto render = std::move(render_expected.value());
         std::cout << "VulkanRenderer の初期化に成功しました\n";
 
         auto floor_data = vanta::scene::create_ground_grid(10.0f, 1.0f, 0);
-        auto mesh_opt = renderer.create_mesh_from_data(floor_data);
+        auto mesh_opt = render.create_mesh_from_data(floor_data);
         if (!mesh_opt) {
             std::cerr << "メッシュのGPU登録に失敗しました\n";
             return -1;
@@ -79,7 +79,7 @@ int main() {
         auto floor_mesh_id = *mesh_opt;
 
         auto cube_data = vanta::scene::create_cube(1.0f, {0.8f, 0.2f, 0.2f}, 1);
-        auto cube_mesh_opt = renderer.create_mesh_from_data(cube_data);
+        auto cube_mesh_opt = render.create_mesh_from_data(cube_data);
         if (!cube_mesh_opt) {
             std::cerr << "キューブのGPU登録に失敗しました\n";
             return -1;
@@ -122,7 +122,7 @@ int main() {
             cube_instance.model_matrix = cube_model;
             snapshot.instances.push_back(cube_instance);
 
-            if (auto draw_res = renderer.draw_frame(snapshot); !draw_res) {
+            if (auto draw_res = render.draw_frame(snapshot); !draw_res) {
                 std::cerr << "描画エラー: " << describe_error(draw_res.error()) << '\n';
                 break;
             }
