@@ -145,5 +145,105 @@ const ImageDescription& ResourceRegistry::get_image_desc(ImageHandle handle) con
     }
     return image_descs_[handle.index];
 }
+// ==========================================
+// Buffer API
+// ==========================================
 
+[[nodiscard]] std::expected<BufferHandle, std::string> ResourceRegistry::create_buffer(
+    const VulkanContext& ctx, const BufferDescription& desc) {
+
+    VkBufferCreateInfo buffer_info{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    buffer_info.size = desc.size;
+    buffer_info.usage = desc.usage;
+    buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VmaAllocationCreateInfo alloc_info{};
+    alloc_info.usage = VMA_MEMORY_USAGE_AUTO;
+    
+    // CPU-to-GPU, GPU-to-CPU などの細かい制御は後でフラグ化するか、TRANSIENT で判定します。
+    if (desc.ownership == ResourceOwnership::TRANSIENT) {
+        alloc_info.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+    }
+
+    VkBuffer new_buffer = VK_NULL_HANDLE;
+    VmaAllocation new_allocation = VK_NULL_HANDLE;
+
+    if (vmaCreateBuffer(ctx.allocator, &buffer_info, &alloc_info, &new_buffer, &new_allocation, nullptr) != VK_SUCCESS) {
+        return std::unexpected("VMAによるバッファの作成に失敗しました。");
+    }
+
+    BufferHandle handle;
+    if (!free_buffer_indices_.empty()) {
+        handle.index = free_buffer_indices_.back();
+        free_buffer_indices_.pop_back();
+        handle.generation = ++buffer_generations_[handle.index];
+
+        buffer_descs_[handle.index] = desc;
+        vk_buffers_[handle.index] = new_buffer;
+        buffer_allocations_[handle.index] = new_allocation;
+    } else {
+        handle.index = static_cast<uint32_t>(vk_buffers_.size());
+        handle.generation = 1;
+
+        buffer_generations_.push_back(handle.generation);
+        buffer_descs_.push_back(desc);
+        vk_buffers_.push_back(new_buffer);
+        buffer_allocations_.push_back(new_allocation);
+    }
+
+    return handle;
 }
+
+BufferHandle ResourceRegistry::register_imported_buffer(VkBuffer buffer, const BufferDescription& desc) {
+    BufferHandle handle;
+    if (!free_buffer_indices_.empty()) {
+        handle.index = free_buffer_indices_.back();
+        free_buffer_indices_.pop_back();
+        handle.generation = ++buffer_generations_[handle.index];
+
+        buffer_descs_[handle.index] = desc;
+        vk_buffers_[handle.index] = buffer;
+        buffer_allocations_[handle.index] = VK_NULL_HANDLE;
+    } else {
+        handle.index = static_cast<uint32_t>(vk_buffers_.size());
+        handle.generation = 1;
+
+        buffer_generations_.push_back(handle.generation);
+        buffer_descs_.push_back(desc);
+        vk_buffers_.push_back(buffer);
+        buffer_allocations_.push_back(VK_NULL_HANDLE);
+    }
+    return handle;
+}
+
+void ResourceRegistry::destroy_buffer(const VulkanContext& ctx, BufferHandle handle) {
+    if (!handle.is_valid() || handle.index >= vk_buffers_.size() || buffer_generations_[handle.index] != handle.generation) {
+        return;
+    }
+
+    if (buffer_allocations_[handle.index] != VK_NULL_HANDLE) {
+        vmaDestroyBuffer(ctx.allocator, vk_buffers_[handle.index], buffer_allocations_[handle.index]);
+    }
+
+    vk_buffers_[handle.index] = VK_NULL_HANDLE;
+    buffer_allocations_[handle.index] = VK_NULL_HANDLE;
+
+    free_buffer_indices_.push_back(handle.index);
+}
+
+VkBuffer ResourceRegistry::get_vk_buffer(BufferHandle handle) const noexcept {
+    if (!handle.is_valid() || handle.index >= vk_buffers_.size() || buffer_generations_[handle.index] != handle.generation) {
+        return VK_NULL_HANDLE;
+    }
+    return vk_buffers_[handle.index];
+}
+
+const BufferDescription& ResourceRegistry::get_buffer_desc(BufferHandle handle) const noexcept {
+    static const BufferDescription invalid_description{};
+    if (!handle.is_valid() || handle.index >= buffer_descs_.size() || buffer_generations_[handle.index] != handle.generation) {
+        return invalid_description;
+    }
+    return buffer_descs_[handle.index];
+}
+
+} // namespace vanta::render

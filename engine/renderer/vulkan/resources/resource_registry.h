@@ -100,11 +100,16 @@ public:
     [[nodiscard]] VkImageView get_vk_image_view(ImageHandle handle) const noexcept;
     [[nodiscard]] const ImageDescription& get_image_desc(ImageHandle handle) const noexcept;
 
-    // --- Buffer API (後で実装) ---
-    // [[nodiscard]] std::expected<BufferHandle, std::string> create_buffer(...);
-    // BufferHandle register_imported_buffer(...);
-    // void destroy_buffer(...);
-    // [[nodiscard]] VkBuffer get_vk_buffer(BufferHandle handle) const noexcept;
+    // --- Buffer API ---
+    [[nodiscard]] std::expected<BufferHandle, std::string> create_buffer(
+        const VulkanContext& ctx, const BufferDescription& desc);
+
+    BufferHandle register_imported_buffer(VkBuffer buffer, const BufferDescription& desc);
+
+    void destroy_buffer(const VulkanContext& ctx, BufferHandle handle);
+
+    [[nodiscard]] VkBuffer get_vk_buffer(BufferHandle handle) const noexcept;
+    [[nodiscard]] const BufferDescription& get_buffer_desc(BufferHandle handle) const noexcept;
 
     // エンジン終了時などの全破棄
     void clear_all(const VulkanContext& ctx);
@@ -122,6 +127,13 @@ private:
 
     // ID再利用のためのフリーリスト
     std::vector<uint32_t> free_image_indices_;
+
+    // Buffer SoA
+    std::vector<uint32_t> buffer_generations_;
+    std::vector<BufferDescription> buffer_descs_;
+    std::vector<VkBuffer> vk_buffers_;
+    std::vector<VmaAllocation> buffer_allocations_;
+    std::vector<uint32_t> free_buffer_indices_;
 };
 
 } // namespace vanta::render
