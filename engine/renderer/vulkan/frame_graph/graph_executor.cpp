@@ -1,4 +1,5 @@
 #include "graph_executor.h"
+#include "vulkan/frame_graph/pass_context.h"
 #include "vulkan/utils/vulkan_format_utils.h"
 
 #include <variant>
@@ -115,7 +116,8 @@ std::expected<void, std::string> GraphExecutor::execute(
 		issue_barriers(cmd, plan.barriers_per_pass[pass_index], registry);
 		const PassData& pass = plan.sorted_passes[pass_index];
 		if (pass.execute) {
-			pass.execute(cmd);
+			PassContext ctx{cmd, registry};
+			pass.execute(ctx);
 		}
 	}
 

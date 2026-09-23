@@ -77,6 +77,8 @@ struct ShadowData {
     glm::mat4 light_projection_matrix;
 };
 
+class PassContext;
+
 struct PassData {
     uint32_t read_images_offset = 0;
     uint32_t read_images_count = 0;
@@ -88,7 +90,7 @@ struct PassData {
     uint32_t write_buffers_offset = 0;
     uint32_t write_buffers_count = 0;
 
-    using ExecuteFunc = std::function<void(VkCommandBuffer)>;
+    using ExecuteFunc = std::function<void(const PassContext&)>;
     ExecuteFunc execute = nullptr;
 };
 

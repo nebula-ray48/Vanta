@@ -9,6 +9,7 @@
 #include "vulkan/frame_graph/graph_builder.h"
 #include "vulkan/frame_graph/graph_compiler.h"
 #include "vulkan/frame_graph/graph_executor.h"
+#include "vulkan/frame_graph/pass_context.h"
 #include "vulkan/resources/resource_registry.h"
 #include "vulkan_renderer.h"
 
@@ -34,7 +35,6 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
     }
 
     fg::RenderGraphBuilder graph_builder;
-    const uint32_t image_index = active_frame.image_index;
     const fg::ImageHandle swapchain_image = graph_builder.import_image(
         swapchain_target_.images[active_frame.image_index],
         fg::ImageDescription{
@@ -46,10 +46,11 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
 
     graph_builder.add_pass("MainColorPass")
         .write_image(swapchain_image, fg::UsageType::ColorAttachment)
-        .execute([this, &snapshot, image_index](VkCommandBuffer cmd) {
+        .execute([this, &snapshot, swapchain_image](const fg::PassContext& ctx) {
+            VkCommandBuffer cmd = ctx.command_buffer();
             VkRenderingAttachmentInfo color_attachment{
                 .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-                .imageView = swapchain_target_.image_views[image_index],
+                .imageView = ctx.get_image_view(swapchain_image),
                 .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                 .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
                 .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
