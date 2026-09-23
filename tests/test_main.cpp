@@ -18,6 +18,7 @@
 #include "vulkan/render/vulkan_renderer.h"
 
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 namespace {
 
@@ -77,6 +78,14 @@ int main() {
         }
         auto floor_mesh_id = *mesh_opt;
 
+        auto cube_data = vanta::scene::create_cube(1.0f, {0.8f, 0.2f, 0.2f}, 1);
+        auto cube_mesh_opt = renderer.create_mesh_from_data(cube_data);
+        if (!cube_mesh_opt) {
+            std::cerr << "キューブのGPU登録に失敗しました\n";
+            return -1;
+        }
+        auto cube_mesh_id = *cube_mesh_opt;
+
         vanta::scene::CameraData camera{};
         vanta::scene::MouseTracker mouse_tracker{};
 
@@ -101,8 +110,17 @@ int main() {
             floor_instance.entity_id = {0};
             floor_instance.mesh_id = floor_mesh_id;
             floor_instance.model_matrix = glm::mat4(1.0f);
-
             snapshot.instances.push_back(floor_instance);
+
+            // キューブのインスタンス情報を追加
+            float time = static_cast<float>(glfwGetTime());
+            RenderInstance cube_instance{};
+            cube_instance.entity_id = {1};
+            cube_instance.mesh_id = cube_mesh_id;
+            glm::mat4 cube_model = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.5f, 0.0f));
+            cube_model = glm::rotate(cube_model, time, glm::vec3(0.0f, 1.0f, 0.0f));
+            cube_instance.model_matrix = cube_model;
+            snapshot.instances.push_back(cube_instance);
 
             if (auto draw_res = renderer.draw_frame(snapshot); !draw_res) {
                 std::cerr << "描画エラー: " << describe_error(draw_res.error()) << '\n';

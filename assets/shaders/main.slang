@@ -114,6 +114,9 @@ float4 fragmentMain(VertexOutput input) : SV_Target {
 
 [shader("fragment")]
 float4 fragmentMain(VertexOutput input) : SV_Target {
-
-    return float4(input.uv.x, input.uv.y, 0.0, 1.0);
+    // Simple directional light
+    float3 N = normalize(input.normalDir);
+    float3 lightDir = normalize(float3(0.5, 1.0, 0.5));
+    float intensity = max(0.2, dot(N, lightDir));
+    return float4(input.color * intensity, 1.0);
 }

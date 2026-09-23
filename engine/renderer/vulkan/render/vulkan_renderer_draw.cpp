@@ -36,8 +36,6 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
 
     fg::RenderGraphBuilder graph_builder;
     const fg::ImageHandle swapchain_image = swapchain_image_handles_[active_frame.image_index];
-    const fg::ImageHandle depth_image = depth_image_handle_;
-
     graph_builder.import_image(
         swapchain_image,
         fg::ImageDescription{
@@ -47,14 +45,13 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
         },
         fg::UsageType::Undefined);
 
-    graph_builder.import_image(
-        depth_image,
+    const fg::ImageHandle depth_image = graph_builder.create_image(
         fg::ImageDescription{
             .width = swapchain_target_.extent.width,
             .height = swapchain_target_.extent.height,
             .format = VK_FORMAT_D32_SFLOAT,
-        },
-        fg::UsageType::DepthAttachment);
+            .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+        });
 
     graph_builder.add_pass("MainColorPass")
         .write_image(swapchain_image, fg::UsageType::ColorAttachment)
@@ -153,7 +150,7 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
 
     fg::GraphExecutor executor;
     const auto execute_result = executor.execute(
-        active_frame.recorder.command_buffer, *plan, graph_data, registry_);
+        active_frame.recorder.command_buffer, *plan, graph_data, registry_, context_);
     if (!execute_result) {
         return std::unexpected(EngineError{LegacyError(execute_result.error())});
     }

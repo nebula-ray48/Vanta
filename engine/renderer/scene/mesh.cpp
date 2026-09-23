@@ -26,6 +26,57 @@ namespace vanta::scene {
 
         return mesh;
     }
+
+    MeshData create_cube(float size, const glm::vec3& color, uint32_t tex_id) {
+        MeshData mesh;
+        float h = size * 0.5f;
+
+        // Front, Back, Top, Bottom, Right, Left
+        mesh.vertices = {
+            // Front
+            {{-h, -h,  h}, color, { 0,  0,  1}, {0, 0}, tex_id},
+            {{ h, -h,  h}, color, { 0,  0,  1}, {1, 0}, tex_id},
+            {{ h,  h,  h}, color, { 0,  0,  1}, {1, 1}, tex_id},
+            {{-h,  h,  h}, color, { 0,  0,  1}, {0, 1}, tex_id},
+            // Back
+            {{ h, -h, -h}, color, { 0,  0, -1}, {0, 0}, tex_id},
+            {{-h, -h, -h}, color, { 0,  0, -1}, {1, 0}, tex_id},
+            {{-h,  h, -h}, color, { 0,  0, -1}, {1, 1}, tex_id},
+            {{ h,  h, -h}, color, { 0,  0, -1}, {0, 1}, tex_id},
+            // Top
+            {{-h,  h,  h}, color, { 0,  1,  0}, {0, 0}, tex_id},
+            {{ h,  h,  h}, color, { 0,  1,  0}, {1, 0}, tex_id},
+            {{ h,  h, -h}, color, { 0,  1,  0}, {1, 1}, tex_id},
+            {{-h,  h, -h}, color, { 0,  1,  0}, {0, 1}, tex_id},
+            // Bottom
+            {{-h, -h, -h}, color, { 0, -1,  0}, {0, 0}, tex_id},
+            {{ h, -h, -h}, color, { 0, -1,  0}, {1, 0}, tex_id},
+            {{ h, -h,  h}, color, { 0, -1,  0}, {1, 1}, tex_id},
+            {{-h, -h,  h}, color, { 0, -1,  0}, {0, 1}, tex_id},
+            // Right
+            {{ h, -h,  h}, color, { 1,  0,  0}, {0, 0}, tex_id},
+            {{ h, -h, -h}, color, { 1,  0,  0}, {1, 0}, tex_id},
+            {{ h,  h, -h}, color, { 1,  0,  0}, {1, 1}, tex_id},
+            {{ h,  h,  h}, color, { 1,  0,  0}, {0, 1}, tex_id},
+            // Left
+            {{-h, -h, -h}, color, {-1,  0,  0}, {0, 0}, tex_id},
+            {{-h, -h,  h}, color, {-1,  0,  0}, {1, 0}, tex_id},
+            {{-h,  h,  h}, color, {-1,  0,  0}, {1, 1}, tex_id},
+            {{-h,  h, -h}, color, {-1,  0,  0}, {0, 1}, tex_id}
+        };
+
+        for (uint32_t i = 0; i < 6; ++i) {
+            uint32_t offset = i * 4;
+            mesh.indices.push_back(offset + 0);
+            mesh.indices.push_back(offset + 1);
+            mesh.indices.push_back(offset + 2);
+            mesh.indices.push_back(offset + 2);
+            mesh.indices.push_back(offset + 3);
+            mesh.indices.push_back(offset + 0);
+        }
+
+        return mesh;
+    }
 }  // namespace vanta::scene
 
 

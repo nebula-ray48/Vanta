@@ -104,12 +104,16 @@ void add_dependency(
     std::unordered_map<uint64_t, std::vector<size_t>> readers;
 
     const auto valid_image = [&graph_data](ImageHandle handle) {
-        return handle.index < graph_data.images.size() &&
-               graph_data.images[handle.index].handle.generation == handle.generation;
+        for (const auto& img : graph_data.images) {
+            if (img.handle.index == handle.index && img.handle.generation == handle.generation) return true;
+        }
+        return false;
     };
     const auto valid_buffer = [&graph_data](BufferHandle handle) {
-        return handle.index < graph_data.buffers.size() &&
-               graph_data.buffers[handle.index].handle.generation == handle.generation;
+        for (const auto& buf : graph_data.buffers) {
+            if (buf.handle.index == handle.index && buf.handle.generation == handle.generation) return true;
+        }
+        return false;
     };
     const auto register_access = [&last_writer, &readers, &edges, &indegrees](
         uint64_t key, bool write, size_t pass_index) {

@@ -5,8 +5,36 @@
 
 namespace vanta::render {
 
+namespace {
+    uint64_t hash_image_desc(const ImageDescription& desc) noexcept {
+        uint64_t h = desc.width;
+        h = (h << 32) | desc.height;
+        h ^= static_cast<uint64_t>(desc.format) << 16;
+        h ^= static_cast<uint64_t>(desc.usage) << 8;
+        h ^= desc.mip_levels;
+        h ^= static_cast<uint64_t>(desc.array_layers) << 4;
+        h ^= static_cast<uint64_t>(desc.samples) << 12;
+        return h;
+    }
+}
+
 [[nodiscard]] std::expected<ImageHandle, std::string> ResourceRegistry::create_image(
     const VulkanContext& ctx, const ImageDescription& desc) {
+
+    const uint64_t desc_hash = hash_image_desc(desc);
+    if (desc.ownership == ResourceOwnership::TRANSIENT) {
+        auto it = image_cache_.find(desc_hash);
+        if (it != image_cache_.end()) {
+            const uint32_t index = it->second;
+            image_cache_.erase(it);
+
+            ImageHandle handle;
+            handle.index = index;
+            handle.generation = ++image_generations_[index];
+            image_descs_[index] = desc;
+            return handle;
+        }
+    }
 
     VkImageCreateInfo image_info{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     image_info.imageType = desc.type;
@@ -23,8 +51,6 @@ namespace vanta::render {
     VmaAllocationCreateInfo alloc_info{};
     alloc_info.usage = VMA_MEMORY_USAGE_AUTO;
 
-    // Transient（一時的）なリソースの場合、VMAの専用メモリを優先するなどの設定が可能ですが、
-    // まずは標準的な設定にします。
     if (desc.ownership == ResourceOwnership::TRANSIENT) {
         alloc_info.flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
     }
@@ -113,6 +139,12 @@ ImageHandle ResourceRegistry::register_imported_image(
 void ResourceRegistry::destroy_image(const VulkanContext& ctx, ImageHandle handle) {
     // ハンドルが有効か、世代が一致しているかを確認する
     if (!handle.is_valid() || handle.index >= vk_images_.size() || image_generations_[handle.index] != handle.generation) {
+        return;
+    }
+
+    if (image_descs_[handle.index].ownership == ResourceOwnership::TRANSIENT && image_allocations_[handle.index] != VK_NULL_HANDLE) {
+        const uint64_t desc_hash = hash_image_desc(image_descs_[handle.index]);
+        image_cache_.emplace(desc_hash, handle.index);
         return;
     }
 
@@ -255,6 +287,23 @@ const BufferDescription& ResourceRegistry::get_buffer_desc(BufferHandle handle) 
         return invalid_description;
     }
     return buffer_descs_[handle.index];
+}
+
+void ResourceRegistry::clear_pool(const VulkanContext& ctx) {
+    for (auto it = image_cache_.begin(); it != image_cache_.end(); ++it) {
+        const uint32_t index = it->second;
+        if (image_allocations_[index] != VK_NULL_HANDLE) {
+            if (vk_image_views_[index] != VK_NULL_HANDLE) {
+                vkDestroyImageView(ctx.device, vk_image_views_[index], nullptr);
+            }
+            vmaDestroyImage(ctx.allocator, vk_images_[index], image_allocations_[index]);
+        }
+        vk_images_[index] = VK_NULL_HANDLE;
+        vk_image_views_[index] = VK_NULL_HANDLE;
+        image_allocations_[index] = VK_NULL_HANDLE;
+        free_image_indices_.push_back(index);
+    }
+    image_cache_.clear();
 }
 
 } // namespace vanta::render

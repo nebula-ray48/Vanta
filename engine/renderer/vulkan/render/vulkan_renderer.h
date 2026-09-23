@@ -97,7 +97,6 @@ namespace vanta::render {
         [[nodiscard]] FrameContext& current_frame() noexcept { return frames_[current_frame_index_]; }
 
         ResourceRegistry registry_;
-        ImageHandle depth_image_handle_;
         std::vector<ImageHandle> swapchain_image_handles_;
 
         AllocatedBuffer vertex_buffer_;

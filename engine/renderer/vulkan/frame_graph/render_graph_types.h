@@ -23,6 +23,7 @@ struct ImageDescription {
     uint32_t width = 0;
     uint32_t height = 0;
     VkFormat format = VK_FORMAT_UNDEFINED;
+    VkImageUsageFlags usage = 0;
     // 影の場合は VK_FORMAT_D32_SFLOAT などを指定します
 };
 

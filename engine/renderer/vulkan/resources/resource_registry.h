@@ -5,6 +5,7 @@
 #include <vector>
 #include <string>
 #include <expected>
+#include <unordered_map>
 
 #include "include/ext/vk_mem_alloc.h"
 
@@ -130,12 +131,20 @@ private:
     // ID再利用のためのフリーリスト
     std::vector<uint32_t> free_image_indices_;
 
+    // テクスチャキャッシュ (Pool)
+    // Hash -> Index
+    std::unordered_multimap<uint64_t, uint32_t> image_cache_;
+
     // Buffer SoA
     std::vector<uint32_t> buffer_generations_;
     std::vector<BufferDescription> buffer_descs_;
     std::vector<VkBuffer> vk_buffers_;
     std::vector<VmaAllocation> buffer_allocations_;
     std::vector<uint32_t> free_buffer_indices_;
+    std::unordered_multimap<uint64_t, uint32_t> buffer_cache_;
+
+public:
+    void clear_pool(const VulkanContext& ctx);
 };
 
 } // namespace vanta::render

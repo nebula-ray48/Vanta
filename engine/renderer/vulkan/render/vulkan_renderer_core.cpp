@@ -27,7 +27,6 @@ VulkanRenderer& VulkanRenderer::operator=(VulkanRenderer&& other) noexcept {
         frames_ = std::move(other.frames_);
         meshes_ = std::move(other.meshes_);
         registry_ = std::move(other.registry_);
-        depth_image_handle_ = other.depth_image_handle_;
         swapchain_image_handles_ = std::move(other.swapchain_image_handles_);
         global_ubo_buffer_ = std::move(other.global_ubo_buffer_);
         descriptor_pool_ = other.descriptor_pool_;
@@ -49,7 +48,6 @@ VulkanRenderer& VulkanRenderer::operator=(VulkanRenderer&& other) noexcept {
         other.ubo_pool_ = VK_NULL_HANDLE;
         other.bindless_layout_ = VK_NULL_HANDLE;
         other.bindless_pool_ = VK_NULL_HANDLE;
-        other.depth_image_handle_ = ::vanta::render::ImageHandle{UINT32_MAX, 0};
     }
     return *this;
 }
@@ -93,9 +91,7 @@ VulkanRenderer::~VulkanRenderer() {
         bindless_layout_ = VK_NULL_HANDLE;
     }
 
-    if (depth_image_handle_.is_valid()) {
-        registry_.destroy_image(context_, depth_image_handle_);
-    }
+    registry_.clear_pool(context_);
 
     context_.destroy();
     std::cout << "VulkanRenderer child objects destroyed cleanly.\n";
@@ -134,21 +130,6 @@ std::expected<VulkanRenderer, EngineError> VulkanRenderer::create(
         );
         renderer.swapchain_image_handles_.push_back(handle);
     }
-
-    auto depth_handle = renderer.registry_.create_image(
-        renderer.context_,
-        ImageDescription{
-            .width = renderer.swapchain_target_.extent.width,
-            .height = renderer.swapchain_target_.extent.height,
-            .format = VK_FORMAT_D32_SFLOAT,
-            .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-            .ownership = ResourceOwnership::PERSISTENT,
-        }
-    );
-    if (!depth_handle) {
-        return std::unexpected(EngineError{LegacyError{"Depth Buffer creation failed"}});
-    }
-    renderer.depth_image_handle_ = *depth_handle;
 
     for (uint32_t index = 0; index < MAX_FRAMES_IN_FLIGHT; ++index) {
         if (auto frame_result = renderer.frames_[index].initialize(renderer.context_, index);

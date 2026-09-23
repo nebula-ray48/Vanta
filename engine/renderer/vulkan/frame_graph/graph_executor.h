@@ -2,6 +2,7 @@
 #include "vulkan/frame_graph/graph_compiler.h"
 #include "vulkan/resources/resource_registry.h"
 #include <vulkan/vulkan.h>
+#include "vulkan/core/vulkan_context.h"
 #include <expected>
 #include <string>
 
@@ -14,7 +15,8 @@ public:
         VkCommandBuffer cmd,
         const ExecutionPlan& plan,
         const RenderGraphData& graph_data,
-        const ResourceRegistry& registry
+        ResourceRegistry& registry,
+        const VulkanContext& ctx
     ) const noexcept;
 
 private:
@@ -22,7 +24,8 @@ private:
     void issue_barriers(
         VkCommandBuffer cmd,
         const std::vector<ResourceBarrier>& barriers,
-        const ResourceRegistry& registry
+        const ResourceRegistry& registry,
+        const std::unordered_map<uint64_t, ImageHandle>& handle_map
     ) const noexcept;
 };
 

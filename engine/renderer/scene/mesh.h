@@ -10,5 +10,6 @@
 namespace vanta::scene {
 
     MeshData create_ground_grid(float size, float uv_scale, uint32_t tex_id);
+    MeshData create_cube(float size, const glm::vec3& color, uint32_t tex_id);
 }
 

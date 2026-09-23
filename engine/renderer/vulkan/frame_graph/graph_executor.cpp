@@ -14,14 +14,20 @@ namespace {
 void GraphExecutor::issue_barriers(
 	VkCommandBuffer cmd,
 	const std::vector<ResourceBarrier>& barriers,
-	const ResourceRegistry& registry) const noexcept {
+	const ResourceRegistry& registry,
+    const std::unordered_map<uint64_t, ImageHandle>& handle_map) const noexcept {
 	std::vector<VkImageMemoryBarrier2> image_barriers;
     std::vector<VkBufferMemoryBarrier2> buffer_barriers;
 	image_barriers.reserve(barriers.size());
 
 	for (const ResourceBarrier& barrier : barriers) {
 	    if (std::holds_alternative<ImageHandle>(barrier.resource)) {
-	        const ImageHandle image_handle = std::get<ImageHandle>(barrier.resource);
+	        ImageHandle image_handle = std::get<ImageHandle>(barrier.resource);
+            uint64_t key = (static_cast<uint64_t>(image_handle.index) << 32) | image_handle.generation;
+            if (auto it = handle_map.find(key); it != handle_map.end()) {
+                image_handle = it->second;
+            }
+
 	        const VkImage image = registry.get_vk_image(image_handle);
 	        if (image == VK_NULL_HANDLE) {
 	            continue;
@@ -86,7 +92,8 @@ std::expected<void, std::string> GraphExecutor::execute(
 	VkCommandBuffer cmd,
 	const ExecutionPlan& plan,
 	const RenderGraphData& graph_data,
-	const ResourceRegistry& registry) const noexcept {
+	ResourceRegistry& registry,
+    const VulkanContext& ctx) const noexcept {
 	if (cmd == VK_NULL_HANDLE) {
 		return std::unexpected("Frame graph command buffer is null");
 	}
@@ -97,16 +104,45 @@ std::expected<void, std::string> GraphExecutor::execute(
 		return std::unexpected("Frame graph execution plan has mismatched pass indices");
 	}
 
+    std::unordered_map<uint64_t, ImageHandle> handle_map;
+    std::vector<ImageHandle> transient_images;
+
+    for (const ImageResource& res : graph_data.images) {
+        if ((res.handle.index & 0x80000000) != 0) {
+            ::vanta::render::ImageDescription transient_desc{};
+            transient_desc.width = res.description.width;
+            transient_desc.height = res.description.height;
+            transient_desc.format = res.description.format;
+            transient_desc.usage = res.description.usage;
+            transient_desc.type = VK_IMAGE_TYPE_2D;
+            transient_desc.mip_levels = 1;
+            transient_desc.array_layers = 1;
+            transient_desc.samples = VK_SAMPLE_COUNT_1_BIT;
+            transient_desc.ownership = ResourceOwnership::TRANSIENT;
+            transient_desc.flags = 0;
+
+            auto handle_res = registry.create_image(ctx, transient_desc);
+            if (handle_res) {
+                uint64_t key = (static_cast<uint64_t>(res.handle.index) << 32) | res.handle.generation;
+                handle_map[key] = *handle_res;
+                transient_images.push_back(*handle_res);
+            }
+        }
+    }
+
 	for (size_t pass_index = 0; pass_index < plan.sorted_passes.size(); ++pass_index) {
-		issue_barriers(cmd, plan.barriers_per_pass[pass_index], registry);
+		issue_barriers(cmd, plan.barriers_per_pass[pass_index], registry, handle_map);
 		const PassData& pass = plan.sorted_passes[pass_index];
 		if (pass.execute) {
-			PassContext ctx{cmd, registry};
-			pass.execute(ctx);
+			PassContext pass_ctx{cmd, registry, handle_map};
+			pass.execute(pass_ctx);
 		}
 	}
 
-	(void)graph_data;
+    for (ImageHandle h : transient_images) {
+        registry.destroy_image(ctx, h);
+    }
+
 	return {};
 }
 
