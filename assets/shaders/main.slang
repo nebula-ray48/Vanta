@@ -49,13 +49,13 @@ struct GlobalUbo {
 ConstantBuffer<GlobalUbo> globalData;
 
 
-// --- Set 1: Bindless リソース ---
-// サイズ不定のテクスチャ配列 (Set 1, Binding 0)
-[[vk::binding(0, 1)]]
+// --- Set 0: Bindless リソース ---
+// サイズ不定のテクスチャ配列 (Set 0, Binding 1)
+[[vk::binding(1, 0)]]
 Texture2D bindlessTextures[];
 
-// 共通サンプラー (Set 1, Binding 1)
-[[vk::binding(1, 1)]]
+// 共通サンプラー (Set 0, Binding 2)
+[[vk::binding(2, 0)]]
 SamplerState defaultSampler;
 
 

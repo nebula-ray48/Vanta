@@ -20,21 +20,6 @@ namespace vanta::render {
         float padding;
     };
 
-    [[nodiscard]] std::expected<VkDescriptorSetLayout, EngineError> create_global_ubo_layout(
-        VkDevice device
-    );
-
-    [[nodiscard]] std::expected<VkDescriptorPool, EngineError> create_descriptor_pool(
-        const VulkanContext& context
-    );
-
-    [[nodiscard]] std::expected<VkDescriptorSet, EngineError> create_descriptor_set(
-        const VulkanContext& context,
-        VkDescriptorPool pool,
-        VkDescriptorSetLayout layout,
-        VkBuffer ubo_buffer
-    );
-
     class BindlessDescriptorLayout {
     public:
         [[nodiscard]] static std::expected<VkDescriptorSetLayout, EngineError> create(VkDevice device) noexcept;
@@ -54,6 +39,12 @@ namespace vanta::render {
             VkDevice device,
             VkDescriptorPool pool,
             VkDescriptorSetLayout layout) noexcept;
+
+        static void update_ubo(
+            VkDevice device,
+            VkDescriptorSet set,
+            VkBuffer ubo_buffer,
+            size_t ubo_size) noexcept;
     };
 
 }  // namespace vanta::render

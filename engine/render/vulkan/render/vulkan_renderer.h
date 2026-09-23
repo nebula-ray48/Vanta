@@ -78,16 +78,8 @@ namespace vanta::render {
 
         // --- Descriptor 関連 ---
         GpuBuffer global_ubo_buffer_;
-        VkDescriptorPool descriptor_pool_{VK_NULL_HANDLE};
-        VkDescriptorSetLayout descriptor_set_layout_{VK_NULL_HANDLE};
-        VkDescriptorSet global_descriptor_set_{VK_NULL_HANDLE};
 
-        // UBO用 (Set 0)
-        VkDescriptorSetLayout ubo_layout_ = VK_NULL_HANDLE;
-        VkDescriptorPool ubo_pool_ = VK_NULL_HANDLE;
-        VkDescriptorSet global_ubo_set_ = VK_NULL_HANDLE;
-
-        // Bindless用 (Set 1)
+        // Bindless用 (Set 0)
         VkDescriptorSetLayout bindless_layout_ = VK_NULL_HANDLE;
         VkDescriptorPool bindless_pool_ = VK_NULL_HANDLE;
         VkDescriptorSet global_bindless_set_ = VK_NULL_HANDLE;

@@ -29,7 +29,7 @@ namespace vanta::render {
         const VkWriteDescriptorSet write_tex{
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
             .dstSet = bindless_set,
-            .dstBinding = 0,
+            .dstBinding = 1,
             .dstArrayElement = index,
             .descriptorCount = 1,
             .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
@@ -44,7 +44,7 @@ namespace vanta::render {
         const VkWriteDescriptorSet write_sampler{
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
             .dstSet = bindless_set,
-            .dstBinding = 1,
+            .dstBinding = 2,
             .dstArrayElement = 0,
             .descriptorCount = 1,
             .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER,
@@ -91,19 +91,6 @@ namespace vanta::render {
     }
 
 std::expected<void, EngineError> VulkanRenderer::initialize_descriptor_resources() {
-    auto ubo_layout_opt = create_global_ubo_layout(context_.device);
-    if (!ubo_layout_opt) return std::unexpected(ubo_layout_opt.error());
-    ubo_layout_ = *ubo_layout_opt;
-
-    auto ubo_pool_opt = create_descriptor_pool(context_);
-    if (!ubo_pool_opt) return std::unexpected(ubo_pool_opt.error());
-    ubo_pool_ = *ubo_pool_opt;
-
-    auto ubo_set_opt = create_descriptor_set(
-        context_, ubo_pool_, ubo_layout_, global_ubo_buffer_.buffer);
-    if (!ubo_set_opt) return std::unexpected(ubo_set_opt.error());
-    global_ubo_set_ = *ubo_set_opt;
-
     auto bindless_layout_opt = BindlessDescriptorLayout::create(context_.device);
     if (!bindless_layout_opt) return std::unexpected(bindless_layout_opt.error());
     bindless_layout_ = *bindless_layout_opt;
@@ -116,6 +103,13 @@ std::expected<void, EngineError> VulkanRenderer::initialize_descriptor_resources
         context_.device, bindless_pool_, bindless_layout_);
     if (!bindless_set_opt) return std::unexpected(bindless_set_opt.error());
     global_bindless_set_ = *bindless_set_opt;
+
+    BindlessDescriptorManager::update_ubo(
+        context_.device,
+        global_bindless_set_,
+        global_ubo_buffer_.buffer,
+        sizeof(GlobalUbo)
+    );
 
     return {};
 }
@@ -160,9 +154,8 @@ std::expected<void, EngineError> VulkanRenderer::initialize_pipeline_resources()
         },
     };
 
-    std::array<VkDescriptorSetLayout, 2> const layouts = {
-        ubo_layout_,       // Set 0
-        bindless_layout_   // Set 1
+    std::array<VkDescriptorSetLayout, 1> const layouts = {
+        bindless_layout_   // Set 0
     };
 
     auto pipeline = GraphicsPipeline::create(

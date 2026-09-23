@@ -29,23 +29,13 @@ VulkanRenderer& VulkanRenderer::operator=(VulkanRenderer&& other) noexcept {
         registry_ = std::move(other.registry_);
         swapchain_image_handles_ = std::move(other.swapchain_image_handles_);
         global_ubo_buffer_ = std::move(other.global_ubo_buffer_);
-        descriptor_pool_ = other.descriptor_pool_;
-        descriptor_set_layout_ = other.descriptor_set_layout_;
-        global_descriptor_set_ = other.global_descriptor_set_;
         pipeline_ = std::move(other.pipeline_);
-
-        ubo_layout_ = other.ubo_layout_;
-        ubo_pool_ = other.ubo_pool_;
-        global_ubo_set_ = other.global_ubo_set_;
-
         bindless_layout_ = other.bindless_layout_;
         bindless_pool_ = other.bindless_pool_;
         global_bindless_set_ = other.global_bindless_set_;
 
         other.context_.device = VK_NULL_HANDLE;
 
-        other.ubo_layout_ = VK_NULL_HANDLE;
-        other.ubo_pool_ = VK_NULL_HANDLE;
         other.bindless_layout_ = VK_NULL_HANDLE;
         other.bindless_pool_ = VK_NULL_HANDLE;
     }
@@ -72,15 +62,6 @@ VulkanRenderer::~VulkanRenderer() {
     pipeline_.destroy(context_.device);
 
     global_ubo_buffer_.destroy(context_);
-
-    if (ubo_pool_ != VK_NULL_HANDLE) {
-        vkDestroyDescriptorPool(context_.device, ubo_pool_, nullptr);
-        ubo_pool_ = VK_NULL_HANDLE;
-    }
-    if (ubo_layout_ != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(context_.device, ubo_layout_, nullptr);
-        ubo_layout_ = VK_NULL_HANDLE;
-    }
 
     if (bindless_pool_ != VK_NULL_HANDLE) {
         BindlessDescriptorManager::destroy_pool(context_.device, bindless_pool_);

@@ -102,8 +102,7 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
             };
             vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-            std::array<VkDescriptorSet, 2> bound_sets = {
-                global_ubo_set_,
+            std::array<VkDescriptorSet, 1> bound_sets = {
                 global_bindless_set_,
             };
             vkCmdBindDescriptorSets(
