@@ -78,7 +78,7 @@ void translate_usage_to_sync_state(
 template <typename Handle>
 uint64_t handle_key(Handle handle, bool buffer) noexcept {
     const uint64_t kind = buffer ? (uint64_t{1} << 63u) : 0;
-    return kind | (static_cast<uint64_t>(handle.id) << 32u) | handle.generation;
+    return kind | (static_cast<uint64_t>(handle.index) << 32u) | handle.generation;
 }
 
 void add_dependency(
@@ -95,7 +95,7 @@ void add_dependency(
 
 } // namespace
 
-std::expected<ExecutionPlan, EngineError> compile_graph(
+[[nodiscard]] std::expected<ExecutionPlan, EngineError> compile_graph(
     const RenderGraphData& graph_data) noexcept {
     const size_t pass_count = graph_data.passes.size();
     std::vector<std::vector<size_t>> edges(pass_count);
@@ -104,12 +104,12 @@ std::expected<ExecutionPlan, EngineError> compile_graph(
     std::unordered_map<uint64_t, std::vector<size_t>> readers;
 
     const auto valid_image = [&graph_data](ImageHandle handle) {
-        return handle.id < graph_data.images.size() &&
-               graph_data.images[handle.id].handle.generation == handle.generation;
+        return handle.index < graph_data.images.size() &&
+               graph_data.images[handle.index].handle.generation == handle.generation;
     };
     const auto valid_buffer = [&graph_data](BufferHandle handle) {
-        return handle.id < graph_data.buffers.size() &&
-               graph_data.buffers[handle.id].handle.generation == handle.generation;
+        return handle.index < graph_data.buffers.size() &&
+               graph_data.buffers[handle.index].handle.generation == handle.generation;
     };
     const auto register_access = [&last_writer, &readers, &edges, &indegrees](
         uint64_t key, bool write, size_t pass_index) {

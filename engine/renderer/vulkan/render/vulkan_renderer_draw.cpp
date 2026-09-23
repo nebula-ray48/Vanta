@@ -35,8 +35,11 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
     }
 
     fg::RenderGraphBuilder graph_builder;
-    const fg::ImageHandle swapchain_image = graph_builder.import_image(
-        swapchain_target_.images[active_frame.image_index],
+    const fg::ImageHandle swapchain_image = swapchain_image_handles_[active_frame.image_index];
+    const fg::ImageHandle depth_image = depth_image_handle_;
+
+    graph_builder.import_image(
+        swapchain_image,
         fg::ImageDescription{
             .width = swapchain_target_.extent.width,
             .height = swapchain_target_.extent.height,
@@ -44,9 +47,19 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
         },
         fg::UsageType::Undefined);
 
+    graph_builder.import_image(
+        depth_image,
+        fg::ImageDescription{
+            .width = swapchain_target_.extent.width,
+            .height = swapchain_target_.extent.height,
+            .format = VK_FORMAT_D32_SFLOAT,
+        },
+        fg::UsageType::DepthAttachment);
+
     graph_builder.add_pass("MainColorPass")
         .write_image(swapchain_image, fg::UsageType::ColorAttachment)
-        .execute([this, &snapshot, swapchain_image](const fg::PassContext& ctx) {
+        .write_image(depth_image, fg::UsageType::DepthAttachment)
+        .execute([this, &snapshot, swapchain_image, depth_image](const fg::PassContext& ctx) {
             VkCommandBuffer cmd = ctx.command_buffer();
             VkRenderingAttachmentInfo color_attachment{
                 .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
@@ -56,13 +69,21 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
                 .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
                 .clearValue = {{{0.0f, 0.0f, 1.0f, 1.0f}}},
             };
+            VkRenderingAttachmentInfo depth_attachment{
+                .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                .imageView = ctx.get_image_view(depth_image),
+                .imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                .storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+                .clearValue = {{{1.0f, 0}},},
+            };
             const VkRenderingInfo rendering_info{
                 .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
                 .renderArea = {.offset = {0, 0}, .extent = swapchain_target_.extent},
                 .layerCount = 1,
                 .colorAttachmentCount = 1,
                 .pColorAttachments = &color_attachment,
-                .pDepthAttachment = nullptr,
+                .pDepthAttachment = &depth_attachment,
             };
 
             vkCmdBeginRendering(cmd, &rendering_info);
@@ -130,21 +151,9 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
         return std::unexpected(EngineError{LegacyError(to_string(plan.error()))});
     }
 
-    ResourceRegistry registry;
-    registry.register_imported_image(
-        swapchain_target_.images[active_frame.image_index],
-        swapchain_target_.image_views[active_frame.image_index],
-        render::ImageDescription{
-            .width = swapchain_target_.extent.width,
-            .height = swapchain_target_.extent.height,
-            .format = swapchain_target_.format,
-            .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-            .ownership = ResourceOwnership::IMPORTED,
-        });
-
     fg::GraphExecutor executor;
     const auto execute_result = executor.execute(
-        active_frame.recorder.command_buffer, *plan, graph_data, registry);
+        active_frame.recorder.command_buffer, *plan, graph_data, registry_);
     if (!execute_result) {
         return std::unexpected(EngineError{LegacyError(execute_result.error())});
     }

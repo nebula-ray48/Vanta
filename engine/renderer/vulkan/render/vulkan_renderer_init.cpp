@@ -168,7 +168,7 @@ std::expected<void, EngineError> VulkanRenderer::initialize_pipeline_resources()
     auto pipeline = GraphicsPipeline::create(
         context_.device,
         swapchain_target_.format,
-        VK_FORMAT_UNDEFINED,
+        VK_FORMAT_D32_SFLOAT,
         swapchain_target_.extent,
         layouts,
         binding_description,

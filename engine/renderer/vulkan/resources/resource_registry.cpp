@@ -1,13 +1,9 @@
 #include "vulkan/resources/resource_registry.h"
 #include "vulkan/utils/vulkan_format_utils.h"
+#include "vulkan/core/vulkan_context.h"
 #include "include/ext/vk_mem_alloc.h"
 
 namespace vanta::render {
-
-struct VulkanContext {
-    VkDevice device;
-    VmaAllocator allocator;
-};
 
 [[nodiscard]] std::expected<ImageHandle, std::string> ResourceRegistry::create_image(
     const VulkanContext& ctx, const ImageDescription& desc) {

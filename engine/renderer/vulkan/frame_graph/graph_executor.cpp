@@ -9,20 +9,6 @@ namespace vanta::render::fg {
 
 namespace {
 
-::vanta::render::ImageHandle to_registry_handle(ImageHandle handle) noexcept {
-	return ::vanta::render::ImageHandle{
-		.index = handle.id,
-		.generation = handle.generation,
-	};
-}
-
-::vanta::render::BufferHandle to_registry_handle(BufferHandle handle) noexcept {
-	return ::vanta::render::BufferHandle{
-		.index = handle.id,
-		.generation = handle.generation,
-	};
-}
-
 } // namespace
 
 void GraphExecutor::issue_barriers(
@@ -36,13 +22,12 @@ void GraphExecutor::issue_barriers(
 	for (const ResourceBarrier& barrier : barriers) {
 	    if (std::holds_alternative<ImageHandle>(barrier.resource)) {
 	        const ImageHandle image_handle = std::get<ImageHandle>(barrier.resource);
-	        const auto reg_handle = to_registry_handle(image_handle);
-	        const VkImage image = registry.get_vk_image(reg_handle);
+	        const VkImage image = registry.get_vk_image(image_handle);
 	        if (image == VK_NULL_HANDLE) {
 	            continue;
 	        }
 
-	        const auto& desc = registry.get_image_desc(reg_handle);
+	        const auto& desc = registry.get_image_desc(image_handle);
 	        const VkImageAspectFlags aspect_mask = ::vanta::render::get_image_aspect_mask(desc.format);
 
 	        image_barriers.push_back(VkImageMemoryBarrier2{
@@ -64,7 +49,7 @@ void GraphExecutor::issue_barriers(
             });
 	    } else if (std::holds_alternative<BufferHandle>(barrier.resource)) {
 	        const BufferHandle buffer_handle = std::get<BufferHandle>(barrier.resource);
-	        const VkBuffer buffer = registry.get_vk_buffer(to_registry_handle(buffer_handle));
+	        const VkBuffer buffer = registry.get_vk_buffer(buffer_handle);
 	        if (buffer == VK_NULL_HANDLE) {
 	            continue;
 	        }

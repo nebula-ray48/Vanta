@@ -80,9 +80,11 @@ public:
     ResourceRegistry() = default;
     ~ResourceRegistry() = default;
 
-    // コピー・ムーブ禁止
+    // コピー禁止、ムーブ許可
     ResourceRegistry(const ResourceRegistry&) = delete;
     ResourceRegistry& operator=(const ResourceRegistry&) = delete;
+    ResourceRegistry(ResourceRegistry&&) noexcept = default;
+    ResourceRegistry& operator=(ResourceRegistry&&) noexcept = default;
 
     // --- Image API ---
     [[nodiscard]] std::expected<ImageHandle, std::string> create_image(

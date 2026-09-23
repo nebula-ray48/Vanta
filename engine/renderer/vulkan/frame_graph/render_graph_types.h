@@ -16,15 +16,8 @@
 
 namespace vanta::render::fg {
 
-struct ImageHandle {
-    uint32_t id{0};
-    uint32_t generation{0};
-};
-
-struct BufferHandle {
-    uint32_t id{0};
-    uint32_t generation{0};
-};
+using ImageHandle = ::vanta::render::ImageHandle;
+using BufferHandle = ::vanta::render::BufferHandle;
 
 struct ImageDescription {
     uint32_t width = 0;

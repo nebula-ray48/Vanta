@@ -4,7 +4,7 @@ namespace vanta::render::fg {
 
 ImageHandle RenderGraphBuilder::create_image(const ImageDescription& description) noexcept {
     const ImageHandle handle{
-        .id = static_cast<uint32_t>(graph_data_.images.size()),
+        .index = static_cast<uint32_t>(graph_data_.images.size()),
         .generation = 1,
     };
     graph_data_.images.push_back(ImageResource{
@@ -21,7 +21,7 @@ ImageHandle RenderGraphBuilder::import_image(
     const ImageDescription& description,
     UsageType initial_usage) noexcept {
     const ImageHandle handle{
-        .id = static_cast<uint32_t>(graph_data_.images.size()),
+        .index = static_cast<uint32_t>(graph_data_.images.size()),
         .generation = 1,
     };
     graph_data_.images.push_back(ImageResource{
@@ -33,9 +33,24 @@ ImageHandle RenderGraphBuilder::import_image(
     return handle;
 }
 
+void RenderGraphBuilder::import_image(
+    ImageHandle handle,
+    const ImageDescription& description,
+    UsageType initial_usage) noexcept {
+    if (graph_data_.images.size() <= handle.index) {
+        graph_data_.images.resize(handle.index + 1);
+    }
+    graph_data_.images[handle.index] = ImageResource{
+        .handle = handle,
+        .description = description,
+        .image = VK_NULL_HANDLE, // Persistent resources are managed externally
+        .initial_usage = initial_usage,
+    };
+}
+
 BufferHandle RenderGraphBuilder::create_buffer(const BufferDescription& description) noexcept {
     const BufferHandle handle{
-        .id = static_cast<uint32_t>(graph_data_.buffers.size()),
+        .index = static_cast<uint32_t>(graph_data_.buffers.size()),
         .generation = 1,
     };
     graph_data_.buffers.push_back(BufferResource{

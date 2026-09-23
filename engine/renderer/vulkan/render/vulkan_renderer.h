@@ -20,6 +20,7 @@
 #include "vulkan/pipeline/pipeline.h"
 #include "vulkan//render/swapchain_target.h"
 #include "vulkan/frame/frame_context.h"
+#include "vulkan/resources/resource_registry.h"
 
 namespace vanta::render {
 
@@ -94,6 +95,10 @@ namespace vanta::render {
         std::expected<void, EngineError> initialize_textures();
         std::vector<vanta::vulkan::Texture> textures_;
         [[nodiscard]] FrameContext& current_frame() noexcept { return frames_[current_frame_index_]; }
+
+        ResourceRegistry registry_;
+        ImageHandle depth_image_handle_;
+        std::vector<ImageHandle> swapchain_image_handles_;
 
         AllocatedBuffer vertex_buffer_;
         AllocatedBuffer index_buffer_;

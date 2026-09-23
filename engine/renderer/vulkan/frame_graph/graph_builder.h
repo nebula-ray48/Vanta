@@ -33,6 +33,11 @@ public:
         VkImage image,
         const ImageDescription& description,
         UsageType initial_usage = UsageType::PRESENT) noexcept;
+
+    void import_image(
+        ImageHandle handle,
+        const ImageDescription& description,
+        UsageType initial_usage) noexcept;
     [[nodiscard]] BufferHandle create_buffer(const BufferDescription& description) noexcept;
 
     PassBuilder add_pass(std::string_view name) noexcept;

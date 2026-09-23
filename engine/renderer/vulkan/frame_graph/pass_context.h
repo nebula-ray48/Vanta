@@ -14,15 +14,15 @@ public:
     [[nodiscard]] VkCommandBuffer command_buffer() const noexcept { return cmd_; }
 
     [[nodiscard]] VkImage get_image(ImageHandle handle) const noexcept {
-        return registry_.get_vk_image(to_registry_handle(handle));
+        return registry_.get_vk_image(handle);
     }
 
     [[nodiscard]] VkImageView get_image_view(ImageHandle handle) const noexcept {
-        return registry_.get_vk_image_view(to_registry_handle(handle));
+        return registry_.get_vk_image_view(handle);
     }
 
     [[nodiscard]] VkBuffer get_buffer(BufferHandle handle) const noexcept {
-        return registry_.get_vk_buffer(to_registry_handle(handle));
+        return registry_.get_vk_buffer(handle);
     }
 
     [[nodiscard]] const ResourceRegistry& resources() const noexcept {
@@ -30,12 +30,6 @@ public:
     }
 
 private:
-    static ::vanta::render::ImageHandle to_registry_handle(ImageHandle handle) noexcept {
-        return {handle.id, handle.generation};
-    }
-    static ::vanta::render::BufferHandle to_registry_handle(BufferHandle handle) noexcept {
-        return {handle.id, handle.generation};
-    }
     VkCommandBuffer cmd_;
     const ResourceRegistry& registry_;
 };

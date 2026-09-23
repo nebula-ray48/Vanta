@@ -40,7 +40,7 @@ TEST(FrameGraph, GeneratesColorToPresentBarrierForImportedImage) {
 
     const ResourceBarrier& barrier = plan->barriers_per_pass[1][0];
     ASSERT_TRUE(std::holds_alternative<ImageHandle>(barrier.resource));
-    EXPECT_EQ(std::get<ImageHandle>(barrier.resource).id, swapchain.id);
+    EXPECT_EQ(std::get<ImageHandle>(barrier.resource).index, swapchain.index);
     EXPECT_EQ(std::get<ImageHandle>(barrier.resource).generation, swapchain.generation);
     EXPECT_EQ(barrier.before, UsageType::ColorAttachment);
     EXPECT_EQ(barrier.after, UsageType::Present);
@@ -64,7 +64,7 @@ TEST(FrameGraph, GeneratesAbstractBufferBarrier) {
     ASSERT_EQ(plan->barriers_per_pass[1].size(), 1U);
     const ResourceBarrier& barrier = plan->barriers_per_pass[1][0];
     ASSERT_TRUE(std::holds_alternative<BufferHandle>(barrier.resource));
-    EXPECT_EQ(std::get<BufferHandle>(barrier.resource).id, buffer.id);
+    EXPECT_EQ(std::get<BufferHandle>(barrier.resource).index, buffer.index);
     EXPECT_EQ(std::get<BufferHandle>(barrier.resource).generation, buffer.generation);
     EXPECT_EQ(barrier.before, UsageType::TransferDst);
     EXPECT_EQ(barrier.after, UsageType::ShaderRead);
@@ -76,7 +76,7 @@ TEST(FrameGraph, RejectsStaleImageGeneration) {
     RenderGraphBuilder builder;
     const ImageHandle image = builder.create_image(
         ImageDescription{.width = 64, .height = 64, .format = VK_FORMAT_R8G8B8A8_UNORM});
-    const ImageHandle stale{.id = image.id, .generation = image.generation + 1};
+    const ImageHandle stale{.index = image.index, .generation = image.generation + 1};
     builder.add_pass("invalid").write_image(stale, UsageType::WRITE_COLOR);
 
     EXPECT_FALSE(compile_graph(builder.build()).has_value());

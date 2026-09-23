@@ -83,13 +83,6 @@ namespace {
         VkExtent2D extent;
     };
 
-    struct DepthResources {
-        VkFormat format;
-        VkImage image;
-        VkDeviceMemory memory;
-        VkImageView view;
-    };
-
     std::expected<SwapchainCreateResult, EngineError> create_swapchain_internal(
         const VulkanContext& context, uint32_t width, uint32_t height)
     {
@@ -208,187 +201,6 @@ namespace {
         return views;
     }
 
-    std::expected<DepthResources, EngineError> create_depth_resources(
-        const VulkanContext& context, const VkExtent2D extent)
-    {
-        constexpr VkFormat DEPTH_FORMAT = VK_FORMAT_D32_SFLOAT;
-
-        const VkImageCreateInfo image_info{
-            .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-            .imageType = VK_IMAGE_TYPE_2D,
-            .format = DEPTH_FORMAT,
-            .extent = {.width = extent.width, .height = extent.height, .depth = 1},
-            .mipLevels = 1,
-            .arrayLayers = 1,
-            .samples = VK_SAMPLE_COUNT_1_BIT,
-            .tiling = VK_IMAGE_TILING_OPTIMAL,
-            .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-            .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-        };
-
-        VkImage depth_image{};
-        if (vkCreateImage(context.device, &image_info, nullptr, &depth_image) != VK_SUCCESS) {
-            return std::unexpected(EngineError{SwapchainError{
-                swapchain_error::CreateDepthResource{"Depth Image生成失敗"}}});
-        }
-
-        VkMemoryRequirements mem_reqs{};
-        vkGetImageMemoryRequirements(context.device, depth_image, &mem_reqs);
-
-        VkPhysicalDeviceMemoryProperties mem_props{};
-        vkGetPhysicalDeviceMemoryProperties(context.physical_device, &mem_props);
-
-        return find_memory_type(mem_props, mem_reqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
-            .and_then([&](const uint32_t mem_type_index) -> std::expected<DepthResources, EngineError> {
-                const VkMemoryAllocateInfo alloc_info{
-                    .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-                    .allocationSize = mem_reqs.size,
-                    .memoryTypeIndex = mem_type_index,
-                };
-
-                VkDeviceMemory depth_memory{};
-                if (vkAllocateMemory(context.device, &alloc_info, nullptr, &depth_memory) != VK_SUCCESS) {
-                    return std::unexpected(EngineError{SwapchainError{
-                        swapchain_error::CreateDepthResource{"Depth メモリ確保失敗"}}});
-                }
-                if (vkBindImageMemory(context.device, depth_image, depth_memory, 0) != VK_SUCCESS) {
-                    return std::unexpected(EngineError{SwapchainError{
-                        swapchain_error::CreateDepthResource{"Depth メモリバインド失敗"}}});
-                }
-
-                const VkImageViewCreateInfo view_info{
-                    .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-                    .image = depth_image,
-                    .viewType = VK_IMAGE_VIEW_TYPE_2D,
-                    .format = DEPTH_FORMAT,
-                    .subresourceRange = {
-                        .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
-                        .baseMipLevel = 0,
-                        .levelCount = 1,
-                        .baseArrayLayer = 0,
-                        .layerCount = 1,
-                    },
-                };
-
-                VkImageView depth_view{};
-                if (vkCreateImageView(context.device, &view_info, nullptr, &depth_view) != VK_SUCCESS) {
-                    return std::unexpected(EngineError{SwapchainError{
-                        swapchain_error::CreateDepthResource{"Depth ImageView生成失敗"}}});
-                }
-
-                return DepthResources{
-                    .format = DEPTH_FORMAT,
-                    .image = depth_image,
-                    .memory = depth_memory,
-                    .view = depth_view,
-                };
-            });
-    }
-
-    std::expected<VkRenderPass, EngineError> create_render_pass(
-        const VkDevice device, const VkFormat color_format, const VkFormat depth_format)
-    {
-        const std::array attachments{
-            VkAttachmentDescription{
-                .format = color_format,
-                .samples = VK_SAMPLE_COUNT_1_BIT,
-                .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-                .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-                .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-                .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-                .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-                .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-            },
-            VkAttachmentDescription{
-                .format = depth_format,
-                .samples = VK_SAMPLE_COUNT_1_BIT,
-                .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-                .storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-                .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-                .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-                .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-                .finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            },
-        };
-
-        constexpr VkAttachmentReference color_ref{
-            .attachment = 0,
-            .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        };
-        constexpr VkAttachmentReference depth_ref{
-            .attachment = 1,
-            .layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-        };
-
-        const VkSubpassDescription subpass{
-            .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
-            .colorAttachmentCount = 1,
-            .pColorAttachments = &color_ref,
-            .pDepthStencilAttachment = &depth_ref,
-        };
-
-        constexpr VkPipelineStageFlags sync_stage_mask =
-            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-            | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-
-        constexpr VkSubpassDependency dependency{
-            .srcSubpass = VK_SUBPASS_EXTERNAL,
-            .dstSubpass = 0,
-            .srcStageMask = sync_stage_mask,
-            .dstStageMask = sync_stage_mask,
-            .srcAccessMask = 0,
-            .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
-                | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-        };
-
-        const VkRenderPassCreateInfo render_pass_info{
-            .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
-            .attachmentCount = static_cast<uint32_t>(attachments.size()),
-            .pAttachments = attachments.data(),
-            .subpassCount = 1,
-            .pSubpasses = &subpass,
-            .dependencyCount = 1,
-            .pDependencies = &dependency,
-        };
-
-        VkRenderPass render_pass{};
-        if (const auto res = vkCreateRenderPass(device, &render_pass_info, nullptr, &render_pass);
-            res != VK_SUCCESS) {
-            return std::unexpected(EngineError{SwapchainError{swapchain_error::CreateRenderPass{res}}});
-        }
-        return render_pass;
-    }
-
-    std::expected<std::vector<VkFramebuffer>, EngineError> create_framebuffers(
-        const VkDevice device, const VkRenderPass render_pass, const VkExtent2D extent,
-        const std::span<const VkImageView> image_views, const VkImageView depth_view)
-    {
-        std::vector<VkFramebuffer> framebuffers;
-        framebuffers.reserve(image_views.size());
-
-        for (const VkImageView view : image_views) {
-            const std::array fb_attachments{view, depth_view};
-            const VkFramebufferCreateInfo fb_info{
-                .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
-                .renderPass = render_pass,
-                .attachmentCount = static_cast<uint32_t>(fb_attachments.size()),
-                .pAttachments = fb_attachments.data(),
-                .width = extent.width,
-                .height = extent.height,
-                .layers = 1,
-            };
-
-            VkFramebuffer fb{};
-            if (vkCreateFramebuffer(device, &fb_info, nullptr, &fb) != VK_SUCCESS) {
-                return std::unexpected(EngineError{SwapchainError{
-                    swapchain_error::CreateFramebuffer{"Framebuffer生成失敗"}}});
-            }
-            framebuffers.push_back(fb);
-        }
-        return framebuffers;
-    }
-
 }  // namespace
 
 std::expected<SwapchainTarget, EngineError> create_swapchain_target(
@@ -402,16 +214,6 @@ std::expected<SwapchainTarget, EngineError> create_swapchain_target(
 
     auto views = create_image_views(context.device, sc->format, *images);
     if (!views) { return std::unexpected(views.error()); }
-
-    auto depth = create_depth_resources(context, sc->extent);
-    if (!depth) { return std::unexpected(depth.error()); }
-
-    auto render_pass = create_render_pass(context.device, sc->format, depth->format);
-    if (!render_pass) { return std::unexpected(render_pass.error()); }
-
-    auto framebuffers = create_framebuffers(
-        context.device, *render_pass, sc->extent, *views, depth->view);
-    if (!framebuffers) { return std::unexpected(framebuffers.error()); }
 
     std::vector<VkSemaphore> render_finished_semaphores;
     render_finished_semaphores.reserve(images->size());
@@ -435,13 +237,7 @@ std::expected<SwapchainTarget, EngineError> create_swapchain_target(
         .extent = sc->extent,
         .images = std::move(*images),
         .image_views = std::move(*views),
-        .framebuffers = std::move(*framebuffers),
         .render_finished_semaphores = std::move(render_finished_semaphores),
-        .depth_format = depth->format,
-        .depth_image = depth->image,
-        .depth_image_memory = depth->memory,
-        .depth_image_view = depth->view,
-        .render_pass = *render_pass,
     };
 }
 
@@ -449,14 +245,9 @@ void SwapchainTarget::destroy(const VkDevice device) const noexcept {
     for (const VkSemaphore semaphore : render_finished_semaphores) {
         vkDestroySemaphore(device, semaphore, nullptr);
     }
-    for (auto&& [view, fb] : std::views::zip(image_views, framebuffers)) {
-        vkDestroyFramebuffer(device, fb, nullptr);
+    for (const VkImageView view : image_views) {
         vkDestroyImageView(device, view, nullptr);
     }
-    vkDestroyRenderPass(device, render_pass, nullptr);
-    vkDestroyImageView(device, depth_image_view, nullptr);
-    vkDestroyImage(device, depth_image, nullptr);
-    vkFreeMemory(device, depth_image_memory, nullptr);
     vkDestroySwapchainKHR(device, swapchain, nullptr);
 }
 

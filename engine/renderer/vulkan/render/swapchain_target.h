@@ -24,19 +24,10 @@ namespace vanta::render {
 
         std::vector<VkImage> images;
         std::vector<VkImageView> image_views;
-        std::vector<VkFramebuffer> framebuffers;
         std::vector<VkSemaphore> render_finished_semaphores;
 
-        VkFormat depth_format{VK_FORMAT_UNDEFINED};
-        VkImage depth_image{VK_NULL_HANDLE};
-        VkDeviceMemory depth_image_memory{VK_NULL_HANDLE};
-        VkImageView depth_image_view{VK_NULL_HANDLE};
-
-        VkRenderPass render_pass{VK_NULL_HANDLE};
-
-
         [[nodiscard]] auto image_resources() const noexcept {
-            return std::views::zip(images, image_views, framebuffers);
+            return std::views::zip(images, image_views);
         }
 
         void destroy(VkDevice device) const noexcept;
