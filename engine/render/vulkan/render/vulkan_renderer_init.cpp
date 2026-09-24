@@ -353,7 +353,7 @@ std::expected<void, EngineError> VulkanRenderer::initialize_pipeline_resources()
 
     // PBR パイプライン (背面カリング)
     auto pbr_res = builder.with_shaders(pbr_stages)
-                          .with_cull_mode(VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_CLOCKWISE)
+                          .with_cull_mode(VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE)
                           .build(context_.device, color_formats, VK_FORMAT_D32_SFLOAT);
     if (!pbr_res) {
         vkDestroyShaderModule(context_.device, *frag_module, nullptr);
@@ -364,7 +364,7 @@ std::expected<void, EngineError> VulkanRenderer::initialize_pipeline_resources()
 
     // Toon パイプライン (背面カリング)
     auto toon_res = builder.with_shaders(toon_stages)
-                           .with_cull_mode(VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_CLOCKWISE)
+                           .with_cull_mode(VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE)
                            .build(context_.device, color_formats, VK_FORMAT_D32_SFLOAT);
     if (!toon_res) return std::unexpected(toon_res.error()); // TODO: エラーハンドリング整理
     toon_pipeline_.pipeline = *toon_res;
@@ -414,7 +414,7 @@ std::expected<void, EngineError> VulkanRenderer::initialize_pipeline_resources()
                   .with_viewport_state(shadow_viewport_state)
                   .with_layout(pipeline_layout_)
                   .with_shaders(shadow_stages)
-                  .with_cull_mode(VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_CLOCKWISE)
+                  .with_cull_mode(VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE)
                   .with_depth_test(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL);
 
     std::array<VkFormat, 0> shadow_color_formats = {};

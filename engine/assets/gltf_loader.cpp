@@ -46,28 +46,6 @@ constexpr const char* get_mime_type_string(fastgltf::MimeType mime) {
     fastgltf::Asset& asset = asset_res.get();
     GltfScene scene;
 
-    for (auto& material : asset.materials) {
-        Material mat;
-        if (material.pbrData.baseColorTexture.has_value()) {
-            mat.base_color_texture_index = static_cast<int32_t>(material.pbrData.baseColorTexture->textureIndex);
-        }
-        if (material.normalTexture.has_value()) {
-            mat.normal_texture_index = static_cast<int32_t>(material.normalTexture->textureIndex);
-        }
-        if (material.pbrData.metallicRoughnessTexture.has_value()) {
-            mat.metallic_roughness_texture_index = static_cast<int32_t>(material.pbrData.metallicRoughnessTexture->textureIndex);
-        }
-        mat.base_color_factor = glm::vec4(
-            material.pbrData.baseColorFactor[0],
-            material.pbrData.baseColorFactor[1],
-            material.pbrData.baseColorFactor[2],
-            material.pbrData.baseColorFactor[3]
-        );
-        mat.metallic_factor = material.pbrData.metallicFactor;
-        mat.roughness_factor = material.pbrData.roughnessFactor;
-        scene.materials.push_back(mat);
-    }
-
     for (auto& image : asset.images) {
         TextureData tex_data;
         tex_data.name = image.name.c_str();
@@ -120,6 +98,61 @@ constexpr const char* get_mime_type_string(fastgltf::MimeType mime) {
         }, image.data);
 
         scene.images.push_back(std::move(tex_data));
+    }
+
+    auto get_image_index = [&](size_t texture_index) -> int32_t {
+        if (texture_index < asset.textures.size() && asset.textures[texture_index].imageIndex.has_value()) {
+            return static_cast<int32_t>(asset.textures[texture_index].imageIndex.value());
+        }
+        return -1;
+    };
+
+    for (auto& material : asset.materials) {
+        Material mat;
+        if (material.pbrData.baseColorTexture.has_value()) {
+            int32_t img_idx = get_image_index(material.pbrData.baseColorTexture->textureIndex);
+            mat.base_color_texture_index = img_idx;
+            if (img_idx >= 0 && static_cast<size_t>(img_idx) < scene.images.size()) {
+                scene.images[static_cast<size_t>(img_idx)].is_srgb = true;
+            }
+        }
+        if (material.emissiveTexture.has_value()) {
+            int32_t img_idx = get_image_index(material.emissiveTexture->textureIndex);
+            mat.emissive_texture_index = img_idx;
+            if (img_idx >= 0 && static_cast<size_t>(img_idx) < scene.images.size()) {
+                scene.images[static_cast<size_t>(img_idx)].is_srgb = true;
+            }
+        }
+        if (material.normalTexture.has_value()) {
+            int32_t img_idx = get_image_index(material.normalTexture->textureIndex);
+            mat.normal_texture_index = img_idx;
+            mat.normal_scale = material.normalTexture->scale;
+            if (img_idx >= 0 && static_cast<size_t>(img_idx) < scene.images.size()) {
+                scene.images[static_cast<size_t>(img_idx)].is_srgb = false;
+            }
+        }
+        if (material.pbrData.metallicRoughnessTexture.has_value()) {
+            int32_t img_idx = get_image_index(material.pbrData.metallicRoughnessTexture->textureIndex);
+            mat.metallic_roughness_texture_index = img_idx;
+            if (img_idx >= 0 && static_cast<size_t>(img_idx) < scene.images.size()) {
+                scene.images[static_cast<size_t>(img_idx)].is_srgb = false;
+            }
+        }
+        if (material.occlusionTexture.has_value()) {
+            int32_t img_idx = get_image_index(material.occlusionTexture->textureIndex);
+            if (img_idx >= 0 && static_cast<size_t>(img_idx) < scene.images.size()) {
+                scene.images[static_cast<size_t>(img_idx)].is_srgb = false;
+            }
+        }
+        mat.base_color_factor = glm::vec4(
+            material.pbrData.baseColorFactor[0],
+            material.pbrData.baseColorFactor[1],
+            material.pbrData.baseColorFactor[2],
+            material.pbrData.baseColorFactor[3]
+        );
+        mat.metallic_factor = material.pbrData.metallicFactor;
+        mat.roughness_factor = material.pbrData.roughnessFactor;
+        scene.materials.push_back(mat);
     }
 
     for (auto& mesh : asset.meshes) {

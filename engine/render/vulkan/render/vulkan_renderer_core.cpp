@@ -212,22 +212,26 @@ std::expected<std::vector<vanta::render::VulkanRenderer::LoadedSceneNode>, std::
         }
 
         if (raw_img_opt) {
-                auto tex_opt = vanta::vulkan::create_texture_from_image(
-                    context_.device,
-                    context_.physical_device,
-                    frames_[0].graphics_command_pool,
-                    context_.graphics_queue,
-                    *raw_img_opt
-                );
-                
-                if (tex_opt) {
-                    auto tex_id_opt = register_texture(std::move(*tex_opt));
-                    if (tex_id_opt) {
-                        current_id = *tex_id_opt;
-                        std::cout << "Loaded GLTF texture: " << img_data.name << " ID: " << current_id << "\n";
-                    }
+            VkFormat format = img_data.is_srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+            auto tex_opt = vanta::vulkan::create_texture_from_image(
+                context_.device,
+                context_.physical_device,
+                frames_[0].graphics_command_pool,
+                context_.graphics_queue,
+                *raw_img_opt,
+                format
+            );
+            
+            if (tex_opt) {
+                auto tex_id_opt = register_texture(std::move(*tex_opt));
+                if (tex_id_opt) {
+                    current_id = *tex_id_opt;
+                    std::cout << "Loaded GLTF texture: " << img_data.name 
+                              << " (ID: " << current_id 
+                              << ", Format: " << (img_data.is_srgb ? "sRGB" : "UNORM") << ")\n";
                 }
             }
+        }
         
         loaded_texture_ids.push_back(current_id); 
     }
@@ -240,15 +244,19 @@ std::expected<std::vector<vanta::render::VulkanRenderer::LoadedSceneNode>, std::
         mat_data.pbr.base_color = mat.base_color_factor;
         mat_data.pbr.metallic = mat.metallic_factor;
         mat_data.pbr.roughness = mat.roughness_factor;
+        mat_data.pbr.normal_scale = mat.normal_scale;
         
-        mat_data.pbr.albedo_texture_id = mat.base_color_texture_index >= 0 && mat.base_color_texture_index < loaded_texture_ids.size() 
-            ? loaded_texture_ids[mat.base_color_texture_index] : 0;
+        mat_data.pbr.albedo_texture_id = (mat.base_color_texture_index >= 0 && static_cast<size_t>(mat.base_color_texture_index) < loaded_texture_ids.size()) 
+            ? loaded_texture_ids[static_cast<size_t>(mat.base_color_texture_index)] : 0;
             
-        mat_data.pbr.normal_texture_id = mat.normal_texture_index >= 0 && mat.normal_texture_index < loaded_texture_ids.size() 
-            ? loaded_texture_ids[mat.normal_texture_index] : 0;
+        mat_data.pbr.normal_texture_id = (mat.normal_texture_index >= 0 && static_cast<size_t>(mat.normal_texture_index) < loaded_texture_ids.size()) 
+            ? loaded_texture_ids[static_cast<size_t>(mat.normal_texture_index)] : 0;
             
-        mat_data.pbr.mrm_texture_id = mat.metallic_roughness_texture_index >= 0 && mat.metallic_roughness_texture_index < loaded_texture_ids.size() 
-            ? loaded_texture_ids[mat.metallic_roughness_texture_index] : 0;
+        mat_data.pbr.mrm_texture_id = (mat.metallic_roughness_texture_index >= 0 && static_cast<size_t>(mat.metallic_roughness_texture_index) < loaded_texture_ids.size()) 
+            ? loaded_texture_ids[static_cast<size_t>(mat.metallic_roughness_texture_index)] : 0;
+            
+        mat_data.pbr.emissive_texture_id = (mat.emissive_texture_index >= 0 && static_cast<size_t>(mat.emissive_texture_index) < loaded_texture_ids.size()) 
+            ? loaded_texture_ids[static_cast<size_t>(mat.emissive_texture_index)] : 0;
 
         loaded_materials.push_back(mat_data);
     }

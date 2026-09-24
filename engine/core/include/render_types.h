@@ -57,9 +57,11 @@ struct PbrMaterialParams {
     glm::vec4 base_color{1.0f};
     float metallic = 0.0f;
     float roughness = 1.0f;
+    float normal_scale = 1.0f;
     uint32_t albedo_texture_id = 0;
     uint32_t normal_texture_id = 0;
     uint32_t mrm_texture_id = 0;
+    uint32_t emissive_texture_id = 0;
 };
 
 struct ToonMaterialParams {

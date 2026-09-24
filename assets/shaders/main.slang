@@ -64,9 +64,11 @@ struct PbrMaterialData {
     float4 base_color;
     float metallic;
     float roughness;
+    float normal_scale;
     uint albedo_texture_id;
     uint normal_texture_id;
     uint mrm_texture_id;
+    uint emissive_texture_id;
 };
 
 PbrMaterialData unpackPbrMaterial(ObjectData objData) {
@@ -74,9 +76,11 @@ PbrMaterialData unpackPbrMaterial(ObjectData objData) {
     mat.base_color = asfloat(uint4(objData.data[0], objData.data[1], objData.data[2], objData.data[3]));
     mat.metallic = asfloat(objData.data[4]);
     mat.roughness = asfloat(objData.data[5]);
-    mat.albedo_texture_id = objData.data[6];
-    mat.normal_texture_id = objData.data[7];
-    mat.mrm_texture_id = objData.data[8];
+    mat.normal_scale = asfloat(objData.data[6]);
+    mat.albedo_texture_id = objData.data[7];
+    mat.normal_texture_id = objData.data[8];
+    mat.mrm_texture_id = objData.data[9];
+    mat.emissive_texture_id = objData.data[10];
     return mat;
 }
 
@@ -148,6 +152,42 @@ float3 FresnelSchlickRoughness(float cosTheta, float3 F0, float roughness) {
     return F0 + (max(float3(1.0 - roughness), F0) - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
+float3 tonemapACESFilmic(float3 x) {
+    const float a = 2.51f;
+    const float b = 0.03f;
+    const float c = 2.43f;
+    const float d = 0.59f;
+    const float e = 0.14f;
+    return saturate((x * (a * x + b)) / (x * (c * x + d) + e));
+}
+
+// フラグメントシェーダー内で法線マップからワールド空間法線を計算する関数
+float3 getNormalFromMap(
+    Texture2D normalMap,
+    SamplerState texSampler,
+    float2 uv,
+    float3 worldPos,
+    float3 worldNormal,
+    float normalScale
+) {
+    // 1. 法線マップのサンプリング [0, 1] -> [-1, 1]
+    float3 tangentNormal = normalMap.Sample(texSampler, uv).xyz * 2.0 - 1.0;
+    tangentNormal = normalize(float3(tangentNormal.xy * normalScale, tangentNormal.z));
+
+    // 2. 画面微小微分から UV と 座標の傾きを計算
+    float3 dPos1 = ddx(worldPos);
+    float3 dPos2 = ddy(worldPos);
+    float2 dUV1  = ddx(uv);
+    float2 dUV2  = ddy(uv);
+    // 3. 接線 (Tangent) と 従接線 (Bitangent) を導出
+    float3 N = normalize(worldNormal);
+    float3 T = normalize(dPos1 * dUV2.y - dPos2 * dUV1.y);
+    float3 B = -normalize(cross(N, T)); // 座標系に合わせて符号調整
+    float3x3 TBN = float3x3(T, B, N);
+    // 4. 接線空間からワールド空間へ変換
+    return normalize(mul(tangentNormal, TBN));
+}
+
 // ==========================================
 // 4. 処理ロジック
 // ==========================================
@@ -198,6 +238,20 @@ float4 fragmentMain(VertexOutput input) : SV_Target {
     }
 
     float3 N = normalize(input.normalDir);
+
+    // ノーマルマップの適用 (法線の凹凸強度 normal_scale を反映)
+    if (matData.normal_texture_id != 0) {
+        uint normalID = NonUniformResourceIndex(matData.normal_texture_id);
+        N = getNormalFromMap(
+            bindlessTextures[normalID], // Bindlessからテクスチャを渡す
+            defaultSampler,
+            input.uv,
+            input.worldPos,
+            N,                          // ベースとなる頂点法線
+            matData.normal_scale
+        );
+    }
+
     float3 V = normalize(globalData.cameraPos - input.worldPos);
     float NdotV = max(dot(N, V), 0.0);
 
@@ -235,14 +289,14 @@ float4 fragmentMain(VertexOutput input) : SV_Target {
         projCoords.x = projCoords.x * 0.5 + 0.5;
         projCoords.y = projCoords.y * 0.5 + 0.5;
 
-        if (projCoords.z >= 0.0 && projCoords.z <= 1.0 && 
-            projCoords.x >= 0.0 && projCoords.x <= 1.0 && 
+        if (projCoords.z >= 0.0 && projCoords.z <= 1.0 &&
+            projCoords.x >= 0.0 && projCoords.x <= 1.0 &&
             projCoords.y >= 0.0 && projCoords.y <= 1.0) {
-            
+
             uint shadowTexID = NonUniformResourceIndex(globalData.shadowMapIndex);
             float currentDepth = projCoords.z;
             float bias = max(0.005 * (1.0 - dot(N, L)), 0.001);
-            
+
             float shadowSum = 0.0;
             // 3x3 PCF
             float2 texelSize = 1.0 / 2048.0;
@@ -255,7 +309,7 @@ float4 fragmentMain(VertexOutput input) : SV_Target {
             shadow = shadowSum / 9.0;
         }
     }
-    
+
     directLight *= shadow;
 
     // ---------------------------------------------------------
@@ -281,14 +335,22 @@ float4 fragmentMain(VertexOutput input) : SV_Target {
     float3 ambient = diffuseIBL + specularIBL;
 
     // ---------------------------------------------------------
-    // 3. 最終合成 & トーンマッピング
+    // 3. エミッシブ (Emissive)
     // ---------------------------------------------------------
-    float3 color = directLight + ambient;
+    float3 emissive = float3(0.0);
+    if (matData.emissive_texture_id != 0) {
+        uint emissiveID = NonUniformResourceIndex(matData.emissive_texture_id);
+        emissive = bindlessTextures[emissiveID].Sample(defaultSampler, input.uv).rgb;
+    }
 
-    // HDR トーンマッピング (Reinhard) と ガンマ補正
-    color = color / (color + float3(1.0));
+    // ---------------------------------------------------------
+    // 4. 最終合成 & トーンマッピング
+    // ---------------------------------------------------------
+    float3 color = directLight + ambient + emissive;
+
+    // ACES Filmic トーンマッピング と ガンマ補正 (Linear -> sRGB)
+    color = tonemapACESFilmic(color);
     color = pow(color, float3(1.0 / 2.2));
 
     return float4(color, matData.base_color.a);
-
 }
