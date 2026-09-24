@@ -26,3 +26,4 @@ struct RawImage {
 
 // 副作用のない純粋な関数として定義
 [[nodiscard]] std::expected<RawImage, TextureError> load_image(const std::filesystem::path& filepath);
+[[nodiscard]] std::expected<RawImage, TextureError> load_image_from_memory(const std::byte* data, size_t size);

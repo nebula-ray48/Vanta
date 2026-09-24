@@ -18,6 +18,9 @@ namespace vanta::render {
         glm::mat4 view_proj;
         glm::vec3 camera_pos;
         float padding;
+        glm::vec4 sun_direction;
+        glm::vec4 sun_color;
+        glm::vec4 ambient_color;
     };
 
     /**

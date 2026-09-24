@@ -231,7 +231,7 @@ std::expected<Texture, VulkanError> create_texture_from_image(
     image_write.descriptorCount = 1;
     image_write.pImageInfo      = &image_info;
 
-    uint32_t sampler_binding = 1;
+    uint32_t sampler_binding = 2; // Binding 2 is defaultSampler
 
     VkDescriptorImageInfo sampler_info{};
     sampler_info.sampler = texture.get_sampler();
@@ -239,7 +239,7 @@ std::expected<Texture, VulkanError> create_texture_from_image(
     VkWriteDescriptorSet sampler_write{};
     sampler_write.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     sampler_write.dstSet          = set;
-    sampler_write.dstBinding      = sampler_binding; // 1
+    sampler_write.dstBinding      = sampler_binding;
     sampler_write.dstArrayElement = 0;
     sampler_write.descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLER;
     sampler_write.descriptorCount = 1;

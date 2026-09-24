@@ -39,13 +39,17 @@ namespace vanta::scene {
     struct Material {
         int32_t base_color_texture_index{ -1 };
         int32_t normal_texture_index{ -1 };
+        int32_t metallic_roughness_texture_index{ -1 };
         glm::vec4 base_color_factor{ 1.0f };
+        float metallic_factor{ 1.0f };
+        float roughness_factor{ 1.0f };
     };
 
     struct TextureData {
         std::vector<std::byte> raw_data;
         std::string name;
         std::string mime_type;
+        std::string uri;
     };
 
     struct GltfScene {
