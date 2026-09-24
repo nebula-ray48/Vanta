@@ -17,6 +17,7 @@ namespace vanta::render {
     struct alignas(16) GlobalUbo {
         glm::mat4 view_proj;
         glm::mat4 inv_view_proj;
+        glm::mat4 light_view_proj;
         glm::vec3 camera_pos;
         float padding;
         glm::vec4 sun_direction;
@@ -25,7 +26,8 @@ namespace vanta::render {
         glm::vec4 sh[9];
         uint32_t brdf_lut_index;
         float max_reflection_lod;
-        float _pad[2];
+        uint32_t shadow_map_index;
+        float _pad[1];
     };
 
     /**

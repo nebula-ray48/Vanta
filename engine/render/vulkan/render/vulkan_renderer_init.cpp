@@ -140,6 +140,40 @@ std::expected<void, EngineError> VulkanRenderer::initialize_textures() {
         std::cerr << "Warning: Failed to load IBL Cubemap from assets/textures/ibl/studio_small_04_4k\n";
     }
 
+    // 3: Shadow Map texture creation
+    auto shadow_tex_opt = vanta::vulkan::create_depth_texture(
+        context_.device,
+        context_.physical_device,
+        2048, 2048
+    );
+    if (shadow_tex_opt) {
+        textures_.push_back(std::move(*shadow_tex_opt));
+        shadow_map_index_ = static_cast<uint32_t>(textures_.size() - 1);
+        
+        shadow_map_handle_ = registry_.register_imported_image(
+            textures_.back().get_image(),
+            textures_.back().get_view(),
+            ImageDescription{
+                .width = 2048,
+                .height = 2048,
+                .format = VK_FORMAT_D32_SFLOAT,
+                .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                .ownership = ResourceOwnership::IMPORTED,
+            }
+        );
+
+        update_bindless_texture(
+            context_.device,
+            global_bindless_set_,
+            0,
+            shadow_map_index_,
+            textures_.back()
+        );
+        std::cout << "Shadow map registered at index: " << shadow_map_index_ << "\n";
+    } else {
+        std::cerr << "Warning: Failed to create shadow map\n";
+    }
+
     return {};
 }
 
@@ -264,6 +298,11 @@ std::expected<void, EngineError> VulkanRenderer::initialize_pipeline_resources()
     auto skybox_frag_module = create_shader_module(context_.device, *skybox_frag_spv);
     if (!skybox_frag_module) return std::unexpected(skybox_frag_module.error());
 
+    auto shadow_vert_spv = read_shader_file("assets/shaders/shadow_vert.spv");
+    if (!shadow_vert_spv) return std::unexpected(shadow_vert_spv.error());
+    auto shadow_vert_module = create_shader_module(context_.device, *shadow_vert_spv);
+    if (!shadow_vert_module) return std::unexpected(shadow_vert_module.error());
+
     std::vector<VkPipelineShaderStageCreateInfo> pbr_stages = {
         { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, *vert_module, "main", nullptr },
         { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT, *frag_module, "main", nullptr }
@@ -272,6 +311,10 @@ std::expected<void, EngineError> VulkanRenderer::initialize_pipeline_resources()
     std::vector<VkPipelineShaderStageCreateInfo> skybox_stages = {
         { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, *skybox_vert_module, "main", nullptr },
         { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT, *skybox_frag_module, "main", nullptr }
+    };
+    
+    std::vector<VkPipelineShaderStageCreateInfo> shadow_stages = {
+        { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, *shadow_vert_module, "main", nullptr }
     };
     
     // TODO: Toon用のシェーダーが用意できたら別モジュールを読み込む
@@ -351,7 +394,36 @@ std::expected<void, EngineError> VulkanRenderer::initialize_pipeline_resources()
     if (!skybox_res) return std::unexpected(skybox_res.error());
     skybox_pipeline_.pipeline = *skybox_res;
 
+    // Shadow パイプライン
+    PipelineBuilder shadow_builder;
+    // シャドウマップは2048x2048
+    VkViewport const shadow_viewport{
+        .x = 0.0f, .y = 0.0f,
+        .width = 2048.0f, .height = 2048.0f,
+        .minDepth = 0.0f, .maxDepth = 1.0f
+    };
+    VkRect2D const shadow_scissor{ .offset = {0, 0}, .extent = {2048, 2048} };
+    VkPipelineViewportStateCreateInfo const shadow_viewport_state{
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        .viewportCount = 1, .pViewports = &shadow_viewport,
+        .scissorCount = 1, .pScissors = &shadow_scissor
+    };
+
+    // Shadow pass uses the standard vertex inputs but only writes depth
+    shadow_builder.with_vertex_input(vertex_input_info)
+                  .with_viewport_state(shadow_viewport_state)
+                  .with_layout(pipeline_layout_)
+                  .with_shaders(shadow_stages)
+                  .with_cull_mode(VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_CLOCKWISE)
+                  .with_depth_test(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL);
+
+    std::array<VkFormat, 0> shadow_color_formats = {};
+    auto shadow_res = shadow_builder.build(context_.device, shadow_color_formats, VK_FORMAT_D32_SFLOAT);
+    if (!shadow_res) return std::unexpected(shadow_res.error());
+    shadow_pipeline_.pipeline = *shadow_res;
+
     // 後始末
+    vkDestroyShaderModule(context_.device, *shadow_vert_module, nullptr);
     vkDestroyShaderModule(context_.device, *skybox_frag_module, nullptr);
     vkDestroyShaderModule(context_.device, *skybox_vert_module, nullptr);
     vkDestroyShaderModule(context_.device, *frag_module, nullptr);

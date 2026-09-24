@@ -52,12 +52,27 @@ namespace vanta::scene {
         std::string uri;
     };
 
+    struct Mesh {
+        uint32_t first_primitive;
+        uint32_t primitive_count;
+    };
+
+    struct Node {
+        std::string name;
+        int32_t mesh_index{ -1 };
+        glm::mat4 local_transform{ 1.0f };
+        std::vector<uint32_t> children;
+    };
+
     struct GltfScene {
         std::vector<Vertex>        vertices;
         std::vector<uint32_t>      indices;
         std::vector<MeshPrimitive> primitives;
+        std::vector<Mesh>          meshes;
         std::vector<Material>      materials;
         std::vector<TextureData>   images;
+        std::vector<Node>          nodes;
+        std::vector<uint32_t>      root_nodes;
     };
 
     [[nodiscard]] std::expected<GltfScene, GltfLoadError> load_gltf(const std::filesystem::path& file_path);

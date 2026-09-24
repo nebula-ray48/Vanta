@@ -31,6 +31,7 @@ struct VertexOutput {
 struct GlobalUbo {
     float4x4 viewProj;
     float4x4 invViewProj;
+    float4x4 lightViewProj;
     float3 cameraPos;
     float _padding;
     float4 sunDirection; // w = intensity
@@ -39,7 +40,8 @@ struct GlobalUbo {
     float4 sh[9];
     uint brdfLutIndex;
     float maxReflectionLod;
-    float2 _pad;
+    uint shadowMapIndex;
+    float _pad;
 };
 
 [[vk::binding(0, 0)]]
@@ -223,6 +225,38 @@ float4 fragmentMain(VertexOutput input) : SV_Target {
 
     float NdotL = max(dot(N, L), 0.0);
     float3 directLight = (kD_direct * albedo / PI + specularDirect) * radiance * NdotL;
+
+    // --- Shadow Mapping (PCF) ---
+    float shadow = 1.0;
+    if (globalData.shadowMapIndex != 0) {
+        float4 lightSpacePos = mul(globalData.lightViewProj, float4(input.worldPos, 1.0));
+        float3 projCoords = lightSpacePos.xyz / lightSpacePos.w;
+        // Transform from [-1, 1] to [0, 1] for UVs, Vulkan Z is [0, 1]
+        projCoords.x = projCoords.x * 0.5 + 0.5;
+        projCoords.y = projCoords.y * 0.5 + 0.5;
+
+        if (projCoords.z >= 0.0 && projCoords.z <= 1.0 && 
+            projCoords.x >= 0.0 && projCoords.x <= 1.0 && 
+            projCoords.y >= 0.0 && projCoords.y <= 1.0) {
+            
+            uint shadowTexID = NonUniformResourceIndex(globalData.shadowMapIndex);
+            float currentDepth = projCoords.z;
+            float bias = max(0.005 * (1.0 - dot(N, L)), 0.001);
+            
+            float shadowSum = 0.0;
+            // 3x3 PCF
+            float2 texelSize = 1.0 / 2048.0;
+            for (int x = -1; x <= 1; ++x) {
+                for (int y = -1; y <= 1; ++y) {
+                    float pcfDepth = bindlessTextures[shadowTexID].SampleLevel(defaultSampler, projCoords.xy + float2(x, y) * texelSize, 0.0).r;
+                    shadowSum += currentDepth - bias > pcfDepth ? 0.0 : 1.0;
+                }
+            }
+            shadow = shadowSum / 9.0;
+        }
+    }
+    
+    directLight *= shadow;
 
     // ---------------------------------------------------------
     // 2. 環境光 (Image-Based Lighting / IBL)

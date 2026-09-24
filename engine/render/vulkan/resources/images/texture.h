@@ -28,6 +28,7 @@ namespace vanta::vulkan {
         Texture(const Texture&) = delete;
         Texture& operator=(const Texture&) = delete;
 
+        [[nodiscard]] VkImage get_image() const noexcept { return image; }
         [[nodiscard]] VkImageView get_view() const noexcept { return image_view; }
         [[nodiscard]] VkSampler get_sampler() const noexcept { return sampler; }
 
@@ -49,6 +50,13 @@ namespace vanta::vulkan {
             VkQueue graphics_queue,
             const std::filesystem::path& base_dir,
             uint32_t mip_count
+        );
+
+        friend std::expected<Texture, VulkanError> create_depth_texture(
+            VkDevice device,
+            VkPhysicalDevice physical_device,
+            uint32_t width,
+            uint32_t height
         );
 
         Texture() = default;
@@ -77,6 +85,13 @@ namespace vanta::vulkan {
         VkQueue graphics_queue,
         const std::filesystem::path& base_dir,
         uint32_t mip_count = 6
+    );
+
+    [[nodiscard]] std::expected<Texture, VulkanError> create_depth_texture(
+        VkDevice device,
+        VkPhysicalDevice physical_device,
+        uint32_t width,
+        uint32_t height
     );
 
     class BindlessManager {

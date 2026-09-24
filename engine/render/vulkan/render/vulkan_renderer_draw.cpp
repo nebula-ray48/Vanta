@@ -13,31 +13,40 @@
 #include "vulkan/resources/resource_registry.h"
 #include "vulkan_renderer.h"
 
+#include <glm/gtc/matrix_transform.hpp>
+
 namespace vanta::render {
 
 GlobalUbo VulkanRenderer::build_global_ubo(const RenderSnapshot& snapshot) const {
+    glm::vec3 sun_dir = glm::normalize(snapshot.sun_direction);
+    glm::mat4 light_proj = glm::ortho(-15.0f, 15.0f, -15.0f, 15.0f, -50.0f, 50.0f);
+    light_proj[1][1] *= -1.0f;
+    glm::mat4 light_view = glm::lookAt(sun_dir * 20.0f, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+
     GlobalUbo ubo{
         .view_proj = snapshot.view_matrix,
         .inv_view_proj = glm::inverse(snapshot.view_matrix),
+        .light_view_proj = light_proj * light_view,
         .camera_pos = snapshot.camera_pos,
         .padding = 0.0f,
-        .sun_direction = glm::vec4(glm::normalize(glm::vec3(0.2f, 0.5f, 1.0f)), 3.0f), // 手前上から照らす
+        .sun_direction = glm::vec4(sun_dir, 3.0f), 
         .sun_color = glm::vec4(1.0f, 1.0f, 0.95f, 1.0f),
         .ambient_color = glm::vec4(0.2f, 0.2f, 0.2f, 1.0f),
         .sh = {
-            glm::vec4( 1.389567f,  1.609414f,  1.902710f, 0.0f), // L00
-            glm::vec4( 0.036784f,  0.039627f,  0.043386f, 0.0f), // L1-1
-            glm::vec4(-0.084193f, -0.106105f, -0.160369f, 0.0f), // L10
-            glm::vec4( 1.353743f,  1.566089f,  1.847385f, 0.0f), // L11
-            glm::vec4( 0.065199f,  0.074574f,  0.087086f, 0.0f), // L2-2
-            glm::vec4( 0.020387f,  0.023414f,  0.026277f, 0.0f), // L2-1
-            glm::vec4( 0.280597f,  0.325054f,  0.384689f, 0.0f), // L20
-            glm::vec4(-0.096101f, -0.117145f, -0.163413f, 0.0f), // L21
-            glm::vec4( 0.245422f,  0.283225f,  0.332972f, 0.0f)  // L22
+            glm::vec4( 1.389567f,  1.609414f,  1.902710f, 0.0f),
+            glm::vec4( 0.036784f,  0.039627f,  0.043386f, 0.0f),
+            glm::vec4(-0.084193f, -0.106105f, -0.160369f, 0.0f),
+            glm::vec4( 1.353743f,  1.566089f,  1.847385f, 0.0f),
+            glm::vec4( 0.065199f,  0.074574f,  0.087086f, 0.0f),
+            glm::vec4( 0.020387f,  0.023414f,  0.026277f, 0.0f),
+            glm::vec4( 0.280597f,  0.325054f,  0.384689f, 0.0f),
+            glm::vec4(-0.096101f, -0.117145f, -0.163413f, 0.0f),
+            glm::vec4( 0.245422f,  0.283225f,  0.332972f, 0.0f) 
         },
         .brdf_lut_index = brdf_lut_index_,
         .max_reflection_lod = 5.0f,
-        ._pad = {0.0f, 0.0f}
+        .shadow_map_index = shadow_map_index_,
+        ._pad = {0.0f}
     };
     return ubo;
 }
@@ -139,6 +148,79 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
             .height = swapchain_target_.extent.height,
             .format = VK_FORMAT_D32_SFLOAT,
             .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+        });
+
+    graph_builder.import_image(
+        shadow_map_handle_,
+        fg::ImageDescription{
+            .width = 2048,
+            .height = 2048,
+            .format = VK_FORMAT_D32_SFLOAT,
+        },
+        fg::UsageType::Undefined);
+
+    graph_builder.add_pass("ShadowPass")
+        .write_image(shadow_map_handle_, fg::UsageType::DepthAttachment)
+        .execute([this, &snapshot](const fg::PassContext& ctx) {
+            VkCommandBuffer cmd = ctx.command_buffer();
+            
+            VkRenderingAttachmentInfo depth_attachment{
+                .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                .imageView = ctx.get_image_view(shadow_map_handle_),
+                .imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                .clearValue = {{{1.0f, 0}},},
+            };
+            
+            const VkRenderingInfo rendering_info{
+                .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+                .renderArea = {.offset = {0, 0}, .extent = {2048, 2048}},
+                .layerCount = 1,
+                .colorAttachmentCount = 0,
+                .pColorAttachments = nullptr,
+                .pDepthAttachment = &depth_attachment,
+            };
+
+            vkCmdBeginRendering(cmd, &rendering_info);
+
+            const VkViewport viewport{
+                .x = 0.0f, .y = 0.0f,
+                .width = 2048.0f, .height = 2048.0f,
+                .minDepth = 0.0f, .maxDepth = 1.0f,
+            };
+            vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+            const VkRect2D scissor{
+                .offset = {0, 0},
+                .extent = {2048, 2048},
+            };
+            vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+            std::array<VkDescriptorSet, 1> bound_sets = { global_bindless_set_ };
+            vkCmdBindDescriptorSets(
+                cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                pipeline_layout_, 0,
+                static_cast<uint32_t>(bound_sets.size()), bound_sets.data(),
+                0, nullptr);
+
+            VkBuffer vertex_buffers[] = {global_vertex_buffer_.buffer};
+            VkDeviceSize offsets[] = {0};
+            vkCmdBindVertexBuffers(cmd, 0, 1, vertex_buffers, offsets);
+            vkCmdBindIndexBuffer(cmd, global_index_buffer_.buffer, 0, VK_INDEX_TYPE_UINT32);
+
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadow_pipeline_.pipeline);
+
+            if (!snapshot.instances.empty()) {
+                vkCmdDrawIndexedIndirect(
+                    cmd,
+                    indirect_buffer_.buffer,
+                    0,
+                    static_cast<uint32_t>(snapshot.instances.size()),
+                    sizeof(VkDrawIndexedIndirectCommand));
+            }
+
+            vkCmdEndRendering(cmd);
         });
 
     graph_builder.add_pass("MainColorPass")

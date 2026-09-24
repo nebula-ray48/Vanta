@@ -73,6 +73,7 @@ namespace vanta::render {
         struct LoadedSceneNode {
             MeshId mesh_id;
             MaterialData material;
+            glm::mat4 global_transform{1.0f};
         };
         
         [[nodiscard]] std::expected<MeshId, EngineError> create_mesh_from_data(const MeshData& data);
@@ -99,6 +100,7 @@ namespace vanta::render {
         GraphicsPipeline toon_pipeline_;
         GraphicsPipeline toon_outline_pipeline_;
         GraphicsPipeline skybox_pipeline_;
+        GraphicsPipeline shadow_pipeline_;
         
         std::array<FrameContext, MAX_FRAMES_IN_FLIGHT> frames_;
         uint32_t current_frame_index_{0};
@@ -117,10 +119,14 @@ namespace vanta::render {
         std::vector<vanta::vulkan::Texture> textures_;
         std::optional<vanta::vulkan::Texture> env_cubemap_;
         uint32_t brdf_lut_index_ = 0;
+        
+        uint32_t shadow_map_index_ = 0;
+        
         [[nodiscard]] FrameContext& current_frame() noexcept { return frames_[current_frame_index_]; }
 
         ResourceRegistry registry_;
         std::vector<ImageHandle> swapchain_image_handles_;
+        ImageHandle shadow_map_handle_;
 
         GpuBuffer global_vertex_buffer_;
         GpuBuffer global_index_buffer_;

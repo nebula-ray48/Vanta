@@ -35,11 +35,14 @@ VulkanRenderer& VulkanRenderer::operator=(VulkanRenderer&& other) noexcept {
         toon_pipeline_ = std::move(other.toon_pipeline_);
         toon_outline_pipeline_ = std::move(other.toon_outline_pipeline_);
         skybox_pipeline_ = std::move(other.skybox_pipeline_);
+        shadow_pipeline_ = std::move(other.shadow_pipeline_);
         bindless_layout_ = other.bindless_layout_;
         bindless_pool_ = other.bindless_pool_;
         global_bindless_set_ = other.global_bindless_set_;
         object_buffer_ = std::move(other.object_buffer_);
         indirect_buffer_ = std::move(other.indirect_buffer_);
+        shadow_map_handle_ = std::move(other.shadow_map_handle_);
+        shadow_map_index_ = other.shadow_map_index_;
 
         global_vertex_buffer_ = std::move(other.global_vertex_buffer_);
         global_index_buffer_ = std::move(other.global_index_buffer_);
@@ -77,6 +80,7 @@ VulkanRenderer::~VulkanRenderer() {
     toon_pipeline_.destroy(context_.device);
     toon_outline_pipeline_.destroy(context_.device);
     skybox_pipeline_.destroy(context_.device);
+    shadow_pipeline_.destroy(context_.device);
     if (pipeline_layout_ != VK_NULL_HANDLE) {
         vkDestroyPipelineLayout(context_.device, pipeline_layout_, nullptr);
         pipeline_layout_ = VK_NULL_HANDLE;
@@ -250,42 +254,86 @@ std::expected<std::vector<vanta::render::VulkanRenderer::LoadedSceneNode>, std::
     }
 
     // 3. メッシュとノードの作成
-    // 今は簡単のため、GLTF全体のジオメトリを1つのMeshDataにするのではなく、
-    // 実用的に使えるよう1つのMeshにまとめた上でPrimitiveごとにノードを作る（または1メッシュとして扱う）
-    // 現状 create_mesh_from_data は全頂点・全インデックスを1つに統合してしまう。
-    // GLTFでは Primitive ごとにマテリアルが違う。
-    // ここではデモ用として、シーン全体を1つの大きな頂点・インデックス配列でロードし、
-    // マテリアルは「シーンの最初のマテリアル」を適用する形でお茶を濁すか、
-    // Primitive 単位で MeshData を分割して登録する方が正しい。
-    
-    std::vector<LoadedSceneNode> nodes;
-    
-    // ★ 一旦、元の「全体を1つのMeshにする」実装を維持し、マテリアルは 0番目を使用する
-    std::vector<Vertex> render_vertices(scene.vertices.size());
-    for (size_t i = 0; i < scene.vertices.size(); ++i) {
-        render_vertices[i].position = scene.vertices[i].position;
-        render_vertices[i].color = glm::vec3(1.0f); // Default color
-        render_vertices[i].normal = scene.vertices[i].normal;
-        render_vertices[i].uv = scene.vertices[i].uv;
-        render_vertices[i].texture_id = 0;
+    size_t vertex_data_size = scene.vertices.size() * sizeof(Vertex);
+    size_t index_data_size = scene.indices.size() * sizeof(uint32_t);
+
+    if (vertex_data_size > 0) {
+        void* mapped_vertex = nullptr;
+        vmaMapMemory(context_.allocator, global_vertex_buffer_.allocation, &mapped_vertex);
+        uint8_t* vertex_dst = static_cast<uint8_t*>(mapped_vertex) + (global_vertex_count_ * sizeof(Vertex));
+        
+        std::vector<Vertex> render_vertices(scene.vertices.size());
+        for (size_t i = 0; i < scene.vertices.size(); ++i) {
+            render_vertices[i].position = scene.vertices[i].position;
+            render_vertices[i].color = glm::vec3(1.0f);
+            render_vertices[i].normal = scene.vertices[i].normal;
+            render_vertices[i].uv = scene.vertices[i].uv;
+            render_vertices[i].texture_id = 0; 
+        }
+        std::memcpy(vertex_dst, render_vertices.data(), vertex_data_size);
+        vmaUnmapMemory(context_.allocator, global_vertex_buffer_.allocation);
     }
 
-    MeshData data { std::move(render_vertices), scene.indices };
-    auto mesh_result = create_mesh_from_data(data);
-    if (!mesh_result) {
-        return std::unexpected("Mesh creation failed.");
+    if (index_data_size > 0) {
+        void* mapped_index = nullptr;
+        vmaMapMemory(context_.allocator, global_index_buffer_.allocation, &mapped_index);
+        uint8_t* index_dst = static_cast<uint8_t*>(mapped_index) + (global_index_count_ * sizeof(uint32_t));
+        std::memcpy(index_dst, scene.indices.data(), index_data_size);
+        vmaUnmapMemory(context_.allocator, global_index_buffer_.allocation);
     }
-    
-    LoadedSceneNode root_node{};
-    root_node.mesh_id = *mesh_result;
-    if (!loaded_materials.empty()) {
-        root_node.material = loaded_materials[0];
-    } else {
-        root_node.material = MaterialData{};
-        root_node.material.type = MaterialType::PBR;
-        root_node.material.pbr = PbrMaterialParams{ .base_color = glm::vec4(1.0f), .metallic = 0.0f, .roughness = 1.0f };
+
+    std::vector<MeshId> primitive_meshes;
+    for (const auto& prim : scene.primitives) {
+        const MeshId mesh_id{static_cast<uint32_t>(meshes_.size())};
+        meshes_.push_back(GpuMesh{
+            .first_index = global_index_count_ + prim.first_index,
+            .index_count = prim.index_count,
+            .vertex_offset = static_cast<int32_t>(global_vertex_count_ + prim.vertex_offset),
+        });
+        primitive_meshes.push_back(mesh_id);
     }
-    nodes.push_back(root_node);
+
+    global_vertex_count_ += static_cast<uint32_t>(scene.vertices.size());
+    global_index_count_ += static_cast<uint32_t>(scene.indices.size());
+
+    std::vector<LoadedSceneNode> nodes;
+
+    auto traverse = [&](auto& self, uint32_t node_idx, const glm::mat4& parent_transform) -> void {
+        const auto& node = scene.nodes[node_idx];
+        glm::mat4 global_transform = parent_transform * node.local_transform;
+
+        if (node.mesh_index >= 0 && node.mesh_index < scene.meshes.size()) {
+            const auto& mesh = scene.meshes[node.mesh_index];
+            for (uint32_t i = 0; i < mesh.primitive_count; ++i) {
+                uint32_t prim_idx = mesh.first_primitive + i;
+                if (prim_idx < scene.primitives.size()) {
+                    const auto& prim = scene.primitives[prim_idx];
+                    LoadedSceneNode loaded_node{};
+                    loaded_node.mesh_id = primitive_meshes[prim_idx];
+                    loaded_node.global_transform = global_transform;
+
+                    if (prim.material_index >= 0 && prim.material_index < loaded_materials.size()) {
+                        loaded_node.material = loaded_materials[prim.material_index];
+                    } else if (!loaded_materials.empty()) {
+                        loaded_node.material = loaded_materials[0];
+                    } else {
+                        loaded_node.material = MaterialData{};
+                        loaded_node.material.type = MaterialType::PBR;
+                        loaded_node.material.pbr = PbrMaterialParams{ .base_color = glm::vec4(1.0f), .metallic = 0.0f, .roughness = 1.0f };
+                    }
+                    nodes.push_back(loaded_node);
+                }
+            }
+        }
+
+        for (uint32_t child_idx : node.children) {
+            self(self, child_idx, global_transform);
+        }
+    };
+
+    for (uint32_t root_idx : scene.root_nodes) {
+        traverse(traverse, root_idx, glm::mat4(1.0f));
+    }
 
     return nodes;
 }

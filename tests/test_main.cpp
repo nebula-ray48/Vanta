@@ -88,15 +88,26 @@ int main() {
 
         vanta::scene::CameraData camera{};
         vanta::scene::MouseTracker mouse_tracker{};
+        
+        static double g_scroll_y = 0.0;
+        glfwSetScrollCallback(window, [](GLFWwindow*, double /*xoffset*/, double yoffset) {
+            g_scroll_y = yoffset;
+        });
 
         uint64_t frame_count = 0;
+        
+        double last_time = glfwGetTime();
 
         while (!glfwWindowShouldClose(window)) {
             glfwPollEvents();
+            
+            double current_time = glfwGetTime();
+            float delta_time = static_cast<float>(current_time - last_time);
+            last_time = current_time;
 
-            auto input_state = vanta::scene::poll_input(window, mouse_tracker);
-
-            float delta_time = 0.016f; // TODO 仮のデルタタイム（後でタイマーを作ります）
+            auto input_state = vanta::scene::poll_input(window, mouse_tracker, static_cast<float>(g_scroll_y));
+            g_scroll_y = 0.0; // Consume scroll
+            
             camera = vanta::scene::update_camera(camera, input_state, delta_time);
 
             RenderSnapshot snapshot{};
@@ -127,16 +138,18 @@ int main() {
                 RenderInstance instance{};
                 instance.entity_id = { static_cast<uint32_t>(i) };
                 instance.mesh_id = node.mesh_id;
-                
                 glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.0f));
                 model = glm::rotate(model, glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
                 model = glm::rotate(model, time * 0.5f, glm::vec3(0.0f, 0.0f, 1.0f));
                 model = glm::scale(model, glm::vec3(2.0f));
-                instance.model_matrix = model;
+                
+                instance.model_matrix = model * node.global_transform;
                 
                 instance.material = node.material;
                 snapshot.instances.push_back(instance);
             }
+
+            snapshot.sun_direction = glm::vec3(std::cos(time * 0.5f), 1.0f, std::sin(time * 0.5f));
 
             if (auto draw_res = render.draw_frame(snapshot); !draw_res) {
                 std::cerr << "描画エラー: " << describe_error(draw_res.error()) << '\n';

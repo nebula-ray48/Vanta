@@ -10,6 +10,8 @@
 #include <fastgltf/tools.hpp>
 #include <fastgltf/types.hpp>
 #include <iostream>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 namespace vanta::scene {
 
@@ -121,13 +123,18 @@ constexpr const char* get_mime_type_string(fastgltf::MimeType mime) {
     }
 
     for (auto& mesh : asset.meshes) {
+        Mesh m;
+        m.first_primitive = static_cast<uint32_t>(scene.primitives.size());
+        m.primitive_count = static_cast<uint32_t>(mesh.primitives.size());
+        scene.meshes.push_back(m);
+
         for (auto& primitive : mesh.primitives) {
             MeshPrimitive prim;
             prim.first_index = static_cast<uint32_t>(scene.indices.size());
             prim.vertex_offset = static_cast<uint32_t>(scene.vertices.size());
             prim.material_index = primitive.materialIndex.has_value() ? static_cast<int32_t>(primitive.materialIndex.value()) : -1;
 
-            uint32_t initial_vertex_count = scene.vertices.size();
+            uint32_t initial_vertex_count = static_cast<uint32_t>(scene.vertices.size());
 
             auto* position_it = primitive.findAttribute("POSITION");
             if (position_it != primitive.attributes.end()) {
@@ -166,6 +173,44 @@ constexpr const char* get_mime_type_string(fastgltf::MimeType mime) {
             }
 
             scene.primitives.push_back(prim);
+        }
+    }
+
+    for (auto& node : asset.nodes) {
+        Node n;
+        n.name = node.name.c_str();
+        n.mesh_index = node.meshIndex.has_value() ? static_cast<int32_t>(node.meshIndex.value()) : -1;
+
+        if (auto* m = std::get_if<fastgltf::math::mat<float, 4, 4>>(&node.transform)) {
+            n.local_transform = glm::mat4(
+                (*m)[0][0], (*m)[0][1], (*m)[0][2], (*m)[0][3],
+                (*m)[1][0], (*m)[1][1], (*m)[1][2], (*m)[1][3],
+                (*m)[2][0], (*m)[2][1], (*m)[2][2], (*m)[2][3],
+                (*m)[3][0], (*m)[3][1], (*m)[3][2], (*m)[3][3]
+            );
+        } else if (auto* trs = std::get_if<fastgltf::TRS>(&node.transform)) {
+            glm::mat4 t = glm::translate(glm::mat4(1.0f), glm::vec3(trs->translation[0], trs->translation[1], trs->translation[2]));
+            glm::quat q(trs->rotation[3], trs->rotation[0], trs->rotation[1], trs->rotation[2]); 
+            glm::mat4 r = glm::mat4_cast(q);
+            glm::mat4 s = glm::scale(glm::mat4(1.0f), glm::vec3(trs->scale[0], trs->scale[1], trs->scale[2]));
+            n.local_transform = t * r * s;
+        }
+
+        for (auto& child : node.children) {
+            n.children.push_back(static_cast<uint32_t>(child));
+        }
+        scene.nodes.push_back(std::move(n));
+    }
+
+    if (asset.defaultScene.has_value() && asset.defaultScene.value() < asset.scenes.size()) {
+        auto& gltf_scene = asset.scenes[asset.defaultScene.value()];
+        for (auto& root : gltf_scene.nodeIndices) {
+            scene.root_nodes.push_back(static_cast<uint32_t>(root));
+        }
+    } else if (!asset.scenes.empty()) {
+        auto& gltf_scene = asset.scenes[0];
+        for (auto& root : gltf_scene.nodeIndices) {
+            scene.root_nodes.push_back(static_cast<uint32_t>(root));
         }
     }
 

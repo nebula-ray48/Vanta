@@ -92,6 +92,7 @@ struct RenderSnapshot {
     std::vector<RenderInstance> instances;
     glm::mat4 view_matrix;
     glm::vec3 camera_pos{0.0f, 0.0f, 0.0f};
+    glm::vec3 sun_direction{0.2f, 0.5f, 1.0f};
 };
 
 struct alignas(16) GpuTransform {

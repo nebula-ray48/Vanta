@@ -451,6 +451,101 @@ std::expected<Texture, VulkanError> create_cubemap_from_hdr_mips(
 
     return tex;
 }
+    std::expected<Texture, VulkanError> create_depth_texture(
+        VkDevice device,
+        VkPhysicalDevice physical_device,
+        uint32_t width,
+        uint32_t height
+    ) {
+        Texture tex;
+        tex.device = device;
+        
+        VkImageCreateInfo image_info{};
+        image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        image_info.imageType = VK_IMAGE_TYPE_2D;
+        image_info.extent.width = width;
+        image_info.extent.height = height;
+        image_info.extent.depth = 1;
+        image_info.mipLevels = 1;
+        image_info.arrayLayers = 1;
+        image_info.format = VK_FORMAT_D32_SFLOAT;
+        image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+        image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        image_info.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+
+        if (vkCreateImage(device, &image_info, nullptr, &tex.image) != VK_SUCCESS) {
+            return std::unexpected(VulkanError::ALLOCATION_FAILED);
+        }
+
+        VkMemoryRequirements mem_reqs;
+        vkGetImageMemoryRequirements(device, tex.image, &mem_reqs);
+
+        VkPhysicalDeviceMemoryProperties mem_props;
+        vkGetPhysicalDeviceMemoryProperties(physical_device, &mem_props);
+
+        uint32_t memory_type_index = -1;
+        for (uint32_t i = 0; i < mem_props.memoryTypeCount; i++) {
+            if ((mem_reqs.memoryTypeBits & (1 << i)) &&
+                (mem_props.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) == VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) {
+                memory_type_index = i;
+                break;
+            }
+        }
+
+        if (memory_type_index == static_cast<uint32_t>(-1)) {
+            return std::unexpected(VulkanError::ALLOCATION_FAILED);
+        }
+
+        VkMemoryAllocateInfo alloc_info{};
+        alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        alloc_info.allocationSize = mem_reqs.size;
+        alloc_info.memoryTypeIndex = memory_type_index;
+
+        if (vkAllocateMemory(device, &alloc_info, nullptr, &tex.memory) != VK_SUCCESS) {
+            return std::unexpected(VulkanError::ALLOCATION_FAILED);
+        }
+
+        vkBindImageMemory(device, tex.image, tex.memory, 0);
+
+        VkImageViewCreateInfo view_info{};
+        view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        view_info.image = tex.image;
+        view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        view_info.format = VK_FORMAT_D32_SFLOAT;
+        view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        view_info.subresourceRange.baseMipLevel = 0;
+        view_info.subresourceRange.levelCount = 1;
+        view_info.subresourceRange.baseArrayLayer = 0;
+        view_info.subresourceRange.layerCount = 1;
+
+        if (vkCreateImageView(device, &view_info, nullptr, &tex.image_view) != VK_SUCCESS) {
+            return std::unexpected(VulkanError::ALLOCATION_FAILED);
+        }
+
+        VkSamplerCreateInfo sampler_info{};
+        sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        sampler_info.magFilter = VK_FILTER_LINEAR;
+        sampler_info.minFilter = VK_FILTER_LINEAR;
+        sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        sampler_info.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+        sampler_info.unnormalizedCoordinates = VK_FALSE;
+        sampler_info.compareEnable = VK_FALSE;
+        sampler_info.compareOp = VK_COMPARE_OP_ALWAYS;
+        sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        sampler_info.mipLodBias = 0.0f;
+        sampler_info.minLod = 0.0f;
+        sampler_info.maxLod = 1.0f;
+
+        if (vkCreateSampler(device, &sampler_info, nullptr, &tex.sampler) != VK_SUCCESS) {
+            return std::unexpected(VulkanError::ALLOCATION_FAILED);
+        }
+
+        return tex;
+    }
 
     void BindlessManager::write_texture(
     VkDevice device,
