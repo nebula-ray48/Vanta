@@ -38,8 +38,9 @@ namespace vanta::render {
     };
 
 
-    struct GpuObjectData {
+    struct alignas(16) GpuObjectData {
         glm::mat4 model_matrix;
+        uint32_t data[16]; // 汎用ペイロード (64 bytes)
     };
 
     /**
@@ -69,9 +70,15 @@ namespace vanta::render {
         VulkanRenderer& operator=(const VulkanRenderer&) = delete;
 
         // メインAPI
+        struct LoadedSceneNode {
+            MeshId mesh_id;
+            MaterialData material;
+        };
+        
         [[nodiscard]] std::expected<MeshId, EngineError> create_mesh_from_data(const MeshData& data);
         [[nodiscard]] std::expected<void, EngineError> draw_frame(const RenderSnapshot& snapshot);
-        std::expected<void, std::string> load_scene(const std::string& filepath);
+        [[nodiscard]] std::expected<std::vector<LoadedSceneNode>, std::string> load_scene(const std::string& filepath);
+        [[nodiscard]] std::expected<uint32_t, EngineError> register_texture(vanta::vulkan::Texture&& texture);
 
     private:
         VulkanRenderer() = default;

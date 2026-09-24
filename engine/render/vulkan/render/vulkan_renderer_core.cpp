@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "assets/gltf_loader.h"
+#include "assets/image_loader.hpp"
 #include "vulkan/resources/buffers/buffer.h"
 #include "vulkan_renderer.h"
 
@@ -40,6 +41,7 @@ VulkanRenderer& VulkanRenderer::operator=(VulkanRenderer&& other) noexcept {
         global_index_buffer_ = std::move(other.global_index_buffer_);
         global_vertex_count_ = other.global_vertex_count_;
         global_index_count_ = other.global_index_count_;
+        textures_ = std::move(other.textures_);
 
         other.context_.device = VK_NULL_HANDLE;
 
@@ -80,6 +82,7 @@ VulkanRenderer::~VulkanRenderer() {
     }
 
     registry_.clear_pool(context_);
+    textures_.clear();
 
     context_.destroy();
     std::cout << "VulkanRenderer child objects destroyed cleanly.\n";
@@ -159,23 +162,128 @@ std::expected<VulkanRenderer, EngineError> VulkanRenderer::create(
     return renderer;
 }
 
-std::expected<void, std::string> vanta::render::VulkanRenderer::load_scene(const std::string& filepath) {
+std::expected<std::vector<vanta::render::VulkanRenderer::LoadedSceneNode>, std::string> vanta::render::VulkanRenderer::load_scene(const std::string& filepath) {
     auto scene_result = vanta::scene::load_gltf(filepath);
     if (!scene_result.has_value()) {
         return std::unexpected("glTF load failed: " + std::to_string(std::to_underlying(scene_result.error())));
     }
     const auto& scene = scene_result.value();
 
+    // 1. 画像のロード
+    std::vector<uint32_t> loaded_texture_ids;
+    for (const auto& img_data : scene.images) {
+        uint32_t current_id = 0; // fallback
+        std::expected<RawImage, TextureError> raw_img_opt = std::unexpected(TextureError::LoadFailed);
+        
+        if (!img_data.uri.empty()) {
+            auto tex_path = std::filesystem::path(filepath).parent_path() / img_data.uri;
+            raw_img_opt = load_image(tex_path);
+            if (!raw_img_opt) {
+                std::cerr << "Failed to load texture file: " << tex_path << "\n";
+            }
+        } else if (!img_data.raw_data.empty()) {
+            raw_img_opt = load_image_from_memory(img_data.raw_data.data(), img_data.raw_data.size());
+            if (!raw_img_opt) {
+                std::cerr << "Failed to load texture from memory for image: " << img_data.name << "\n";
+            }
+        } else {
+            std::cerr << "Image data has neither URI nor raw_data: " << img_data.name << "\n";
+        }
+
+        if (raw_img_opt) {
+                auto tex_opt = vanta::vulkan::create_texture_from_image(
+                    context_.device,
+                    context_.physical_device,
+                    frames_[0].graphics_command_pool,
+                    context_.graphics_queue,
+                    *raw_img_opt
+                );
+                
+                if (tex_opt) {
+                    auto tex_id_opt = register_texture(std::move(*tex_opt));
+                    if (tex_id_opt) {
+                        current_id = *tex_id_opt;
+                        std::cout << "Loaded GLTF texture: " << img_data.name << " ID: " << current_id << "\n";
+                    }
+                }
+            }
+        
+        loaded_texture_ids.push_back(current_id); 
+    }
+
+    // 2. マテリアルの変換
+    std::vector<MaterialData> loaded_materials;
+    for (const auto& mat : scene.materials) {
+        MaterialData mat_data{};
+        mat_data.base_color = mat.base_color_factor;
+        mat_data.metallic = mat.metallic_factor;
+        mat_data.roughness = mat.roughness_factor;
+        
+        mat_data.albedo_texture_id = mat.base_color_texture_index >= 0 && mat.base_color_texture_index < loaded_texture_ids.size() 
+            ? loaded_texture_ids[mat.base_color_texture_index] : 0;
+            
+        mat_data.normal_texture_id = mat.normal_texture_index >= 0 && mat.normal_texture_index < loaded_texture_ids.size() 
+            ? loaded_texture_ids[mat.normal_texture_index] : 0;
+            
+        mat_data.mrm_texture_id = mat.metallic_roughness_texture_index >= 0 && mat.metallic_roughness_texture_index < loaded_texture_ids.size() 
+            ? loaded_texture_ids[mat.metallic_roughness_texture_index] : 0;
+
+        loaded_materials.push_back(mat_data);
+    }
+
+    // 3. メッシュとノードの作成
+    // 今は簡単のため、GLTF全体のジオメトリを1つのMeshDataにするのではなく、
+    // 実用的に使えるよう1つのMeshにまとめた上でPrimitiveごとにノードを作る（または1メッシュとして扱う）
+    // 現状 create_mesh_from_data は全頂点・全インデックスを1つに統合してしまう。
+    // GLTFでは Primitive ごとにマテリアルが違う。
+    // ここではデモ用として、シーン全体を1つの大きな頂点・インデックス配列でロードし、
+    // マテリアルは「シーンの最初のマテリアル」を適用する形でお茶を濁すか、
+    // Primitive 単位で MeshData を分割して登録する方が正しい。
+    
+    std::vector<LoadedSceneNode> nodes;
+    
+    // ★ 一旦、元の「全体を1つのMeshにする」実装を維持し、マテリアルは 0番目を使用する
     std::vector<Vertex> render_vertices(scene.vertices.size());
-    std::memcpy(render_vertices.data(), scene.vertices.data(), scene.vertices.size() * sizeof(Vertex));
+    for (size_t i = 0; i < scene.vertices.size(); ++i) {
+        render_vertices[i].position = scene.vertices[i].position;
+        render_vertices[i].color = glm::vec3(1.0f); // Default color
+        render_vertices[i].normal = scene.vertices[i].normal;
+        render_vertices[i].uv = scene.vertices[i].uv;
+        render_vertices[i].texture_id = 0;
+    }
 
     MeshData data { std::move(render_vertices), scene.indices };
     auto mesh_result = create_mesh_from_data(data);
     if (!mesh_result) {
         return std::unexpected("Mesh creation failed.");
     }
+    
+    LoadedSceneNode root_node{};
+    root_node.mesh_id = *mesh_result;
+    if (!loaded_materials.empty()) {
+        root_node.material = loaded_materials[0];
+    } else {
+        root_node.material = MaterialData{ .base_color = glm::vec4(1.0f), .metallic = 0.0f, .roughness = 1.0f };
+    }
+    nodes.push_back(root_node);
 
-    return {};
+    return nodes;
+}
+
+std::expected<uint32_t, EngineError> vanta::render::VulkanRenderer::register_texture(vanta::vulkan::Texture&& texture) {
+    uint32_t index = static_cast<uint32_t>(textures_.size());
+    
+    // Binding 1 は bindlessTextures[]
+    vanta::vulkan::BindlessManager::write_texture(
+        context_.device,
+        global_bindless_set_,
+        1,
+        index,
+        texture
+    );
+    
+    textures_.push_back(std::move(texture));
+    return index;
 }
 
 }  // namespace vanta::render

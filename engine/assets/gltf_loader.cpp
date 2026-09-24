@@ -9,6 +9,7 @@
 #include <fastgltf/glm_element_traits.hpp>
 #include <fastgltf/tools.hpp>
 #include <fastgltf/types.hpp>
+#include <iostream>
 
 namespace vanta::scene {
 
@@ -48,12 +49,20 @@ constexpr const char* get_mime_type_string(fastgltf::MimeType mime) {
         if (material.pbrData.baseColorTexture.has_value()) {
             mat.base_color_texture_index = static_cast<int32_t>(material.pbrData.baseColorTexture->textureIndex);
         }
+        if (material.normalTexture.has_value()) {
+            mat.normal_texture_index = static_cast<int32_t>(material.normalTexture->textureIndex);
+        }
+        if (material.pbrData.metallicRoughnessTexture.has_value()) {
+            mat.metallic_roughness_texture_index = static_cast<int32_t>(material.pbrData.metallicRoughnessTexture->textureIndex);
+        }
         mat.base_color_factor = glm::vec4(
             material.pbrData.baseColorFactor[0],
             material.pbrData.baseColorFactor[1],
             material.pbrData.baseColorFactor[2],
             material.pbrData.baseColorFactor[3]
         );
+        mat.metallic_factor = material.pbrData.metallicFactor;
+        mat.roughness_factor = material.pbrData.roughnessFactor;
         scene.materials.push_back(mat);
     }
 
@@ -62,15 +71,31 @@ constexpr const char* get_mime_type_string(fastgltf::MimeType mime) {
         tex_data.name = image.name.c_str();
 
         std::visit(fastgltf::visitor{
-            [](auto& arg) {},
+            [&](auto& arg) {
+                std::cerr << "Unknown image data source for image " << tex_data.name << "\n";
+            },
+            [&](fastgltf::sources::URI& uri) {
+                tex_data.uri = std::string(uri.uri.path().begin(), uri.uri.path().end());
+                std::cout << "Image source is URI: " << tex_data.uri << "\n";
+            },
             [&](fastgltf::sources::Vector& vec) {
+                std::cout << "Image source is Vector\n";
                 tex_data.raw_data.assign(
                     reinterpret_cast<const std::byte*>(vec.bytes.data()),
                     reinterpret_cast<const std::byte*>(vec.bytes.data() + vec.bytes.size())
                 );
-                tex_data.mime_type = get_mime_type_string(vec.mimeType); // 修正
+                tex_data.mime_type = get_mime_type_string(vec.mimeType);
+            },
+            [&](fastgltf::sources::Array& arr) {
+                std::cout << "Image source is Array\n";
+                tex_data.raw_data.assign(
+                    reinterpret_cast<const std::byte*>(arr.bytes.data()),
+                    reinterpret_cast<const std::byte*>(arr.bytes.data() + arr.bytes.size())
+                );
+                tex_data.mime_type = get_mime_type_string(arr.mimeType);
             },
             [&](fastgltf::sources::BufferView& view) {
+                std::cout << "Image source is BufferView\n";
                 auto& bufferView = asset.bufferViews[view.bufferViewIndex];
                 auto& buffer = asset.buffers[bufferView.bufferIndex];
                 std::visit(fastgltf::visitor{
@@ -88,7 +113,6 @@ constexpr const char* get_mime_type_string(fastgltf::MimeType mime) {
                         );
                     }
                 }, buffer.data);
-                // 画像データ自体にMimeTypeが設定されていない場合のフォールバック
                 tex_data.mime_type = get_mime_type_string(fastgltf::MimeType::None);
             }
         }, image.data);

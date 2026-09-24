@@ -48,10 +48,22 @@ struct MeshData {
     static MeshData new_plane(float width, float depth, glm::vec3 color);
 };
 
+struct MaterialData {
+    glm::vec4 base_color;
+    float metallic;
+    float roughness;
+    uint32_t albedo_texture_id;
+    uint32_t normal_texture_id;
+    uint32_t mrm_texture_id;
+    float _pad0;
+    float _pad1;
+};
+
 struct RenderInstance {
     EntityId entity_id;
     MeshId mesh_id;
     glm::mat4 model_matrix;
+    MaterialData material;
 };
 
 struct RenderSnapshot {

@@ -18,8 +18,11 @@ namespace vanta::render {
 GlobalUbo VulkanRenderer::build_global_ubo(const RenderSnapshot& snapshot) {
     return GlobalUbo{
         .view_proj = snapshot.view_matrix,
-        .camera_pos = glm::vec3(0.0f),
+        .camera_pos = glm::vec3(0.0f, 0.0f, 2.0f),
         .padding = 0.0f,
+        .sun_direction = glm::vec4(glm::normalize(glm::vec3(0.2f, 0.5f, 1.0f)), 3.0f), // 手前上から照らす
+        .sun_color = glm::vec4(1.0f, 1.0f, 0.95f, 1.0f),
+        .ambient_color = glm::vec4(0.2f, 0.2f, 0.2f, 1.0f),
     };
 }
 
@@ -52,6 +55,21 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
     uint32_t instance_idx = 0;
     for (const auto& instance : snapshot.instances) {
         object_data[instance_idx].model_matrix = instance.model_matrix;
+        
+        // PBRペイロードとして書き込む
+        // data[0..3] = base_color
+        // data[4] = metallic
+        // data[5] = roughness
+        // data[6] = albedo_texture_id
+        // data[7] = normal_texture_id
+        // data[8] = mrm_texture_id
+        
+        std::memcpy(&object_data[instance_idx].data[0], &instance.material.base_color, sizeof(glm::vec4));
+        std::memcpy(&object_data[instance_idx].data[4], &instance.material.metallic, sizeof(float));
+        std::memcpy(&object_data[instance_idx].data[5], &instance.material.roughness, sizeof(float));
+        object_data[instance_idx].data[6] = instance.material.albedo_texture_id;
+        object_data[instance_idx].data[7] = instance.material.normal_texture_id;
+        object_data[instance_idx].data[8] = instance.material.mrm_texture_id;
 
         if (instance.mesh_id.value < meshes_.size()) {
             const auto& mesh = meshes_[instance.mesh_id.value];
@@ -101,7 +119,7 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
                 .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                 .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
                 .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-                .clearValue = {{{0.0f, 0.0f, 1.0f, 1.0f}}},
+                .clearValue = {{{0.1f, 0.1f, 0.11f, 1.0f}}},
             };
             VkRenderingAttachmentInfo depth_attachment{
                 .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
