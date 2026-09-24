@@ -11,6 +11,19 @@
 #include <array>
 #include <cstddef>
 
+enum class MaterialPipelineStrategy : uint32_t {
+    PBR_Only = 0,
+    PBR_Toon_Hybrid = 1
+};
+
+struct RendererConfig {
+    MaterialPipelineStrategy material_strategy = MaterialPipelineStrategy::PBR_Toon_Hybrid;
+    const char* app_name = "Vanta Engine";
+    void* window_handle = nullptr;
+    uint32_t window_width = 800;
+    uint32_t window_height = 600;
+};
+
 struct EntityId { uint32_t value; };
 struct MeshId { uint32_t value; };
 
@@ -58,10 +71,12 @@ struct PbrMaterialParams {
     float metallic = 0.0f;
     float roughness = 1.0f;
     float normal_scale = 1.0f;
+    float occlusion_strength = 1.0f;
     uint32_t albedo_texture_id = 0;
     uint32_t normal_texture_id = 0;
     uint32_t mrm_texture_id = 0;
     uint32_t emissive_texture_id = 0;
+    uint32_t occlusion_texture_id = 0;
 };
 
 struct ToonMaterialParams {

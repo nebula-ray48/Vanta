@@ -23,6 +23,7 @@ VulkanRenderer& VulkanRenderer::operator=(VulkanRenderer&& other) noexcept {
             vkDeviceWaitIdle(context_.device);
         }
 
+        config_ = other.config_;
         context_ = other.context_;
         swapchain_target_ = std::move(other.swapchain_target_);
         frames_ = std::move(other.frames_);
@@ -110,19 +111,17 @@ VulkanRenderer::~VulkanRenderer() {
 }
 
 std::expected<VulkanRenderer, EngineError> VulkanRenderer::create(
-    const char* app_name,
-    void* window_handle,
-    uint32_t window_width,
-    uint32_t window_height) {
+    const RendererConfig& config) {
     VulkanRenderer renderer;
+    renderer.config_ = config;
 
-    auto context = create_vulkan_context(app_name, window_handle);
+    auto context = create_vulkan_context(config.app_name, config.window_handle);
     if (!context) {
         return std::unexpected(context.error());
     }
     renderer.context_ = std::move(*context);
 
-    auto swapchain = create_swapchain_target(renderer.context_, window_width, window_height);
+    auto swapchain = create_swapchain_target(renderer.context_, config.window_width, config.window_height);
     if (!swapchain) {
         return std::unexpected(swapchain.error());
     }
@@ -245,6 +244,7 @@ std::expected<std::vector<vanta::render::VulkanRenderer::LoadedSceneNode>, std::
         mat_data.pbr.metallic = mat.metallic_factor;
         mat_data.pbr.roughness = mat.roughness_factor;
         mat_data.pbr.normal_scale = mat.normal_scale;
+        mat_data.pbr.occlusion_strength = mat.occlusion_strength;
         
         mat_data.pbr.albedo_texture_id = (mat.base_color_texture_index >= 0 && static_cast<size_t>(mat.base_color_texture_index) < loaded_texture_ids.size()) 
             ? loaded_texture_ids[static_cast<size_t>(mat.base_color_texture_index)] : 0;
@@ -257,6 +257,9 @@ std::expected<std::vector<vanta::render::VulkanRenderer::LoadedSceneNode>, std::
             
         mat_data.pbr.emissive_texture_id = (mat.emissive_texture_index >= 0 && static_cast<size_t>(mat.emissive_texture_index) < loaded_texture_ids.size()) 
             ? loaded_texture_ids[static_cast<size_t>(mat.emissive_texture_index)] : 0;
+
+        mat_data.pbr.occlusion_texture_id = (mat.occlusion_texture_index >= 0 && static_cast<size_t>(mat.occlusion_texture_index) < loaded_texture_ids.size()) 
+            ? loaded_texture_ids[static_cast<size_t>(mat.occlusion_texture_index)] : 0;
 
         loaded_materials.push_back(mat_data);
     }

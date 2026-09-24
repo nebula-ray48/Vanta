@@ -362,20 +362,22 @@ std::expected<void, EngineError> VulkanRenderer::initialize_pipeline_resources()
     }
     pbr_pipeline_.pipeline = *pbr_res;
 
-    // Toon パイプライン (背面カリング)
-    auto toon_res = builder.with_shaders(toon_stages)
-                           .with_cull_mode(VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE)
-                           .build(context_.device, color_formats, VK_FORMAT_D32_SFLOAT);
-    if (!toon_res) return std::unexpected(toon_res.error()); // TODO: エラーハンドリング整理
-    toon_pipeline_.pipeline = *toon_res;
+    if (config_.material_strategy == MaterialPipelineStrategy::PBR_Toon_Hybrid) {
+        // Toon パイプライン (背面カリング)
+        auto toon_res = builder.with_shaders(toon_stages)
+                               .with_cull_mode(VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE)
+                               .build(context_.device, color_formats, VK_FORMAT_D32_SFLOAT);
+        if (!toon_res) return std::unexpected(toon_res.error()); // TODO: エラーハンドリング整理
+        toon_pipeline_.pipeline = *toon_res;
 
-    // Toon Outline パイプライン (表面カリング)
-    auto outline_res = builder.with_shaders(outline_stages)
-                              .with_cull_mode(VK_CULL_MODE_FRONT_BIT, VK_FRONT_FACE_CLOCKWISE)
-                              // .with_depth_test(VK_TRUE, VK_FALSE, VK_COMPARE_OP_LESS_OR_EQUAL) // アウトライン特有の設定
-                              .build(context_.device, color_formats, VK_FORMAT_D32_SFLOAT);
-    if (!outline_res) return std::unexpected(outline_res.error());
-    toon_outline_pipeline_.pipeline = *outline_res;
+        // Toon Outline パイプライン (表面カリング)
+        auto outline_res = builder.with_shaders(outline_stages)
+                                  .with_cull_mode(VK_CULL_MODE_FRONT_BIT, VK_FRONT_FACE_CLOCKWISE)
+                                  // .with_depth_test(VK_TRUE, VK_FALSE, VK_COMPARE_OP_LESS_OR_EQUAL) // アウトライン特有の設定
+                                  .build(context_.device, color_formats, VK_FORMAT_D32_SFLOAT);
+        if (!outline_res) return std::unexpected(outline_res.error());
+        toon_outline_pipeline_.pipeline = *outline_res;
+    }
 
     // Skybox パイプライン
     VkPipelineVertexInputStateCreateInfo empty_vertex_input{

@@ -57,11 +57,14 @@ int main() {
     std::cout << "ウィンドウを作成しました。VulkanRenderer を初期化します...\n";
 
     try {
-        auto render_expected = vanta::render::VulkanRenderer::create(
-            "Rey Engine Test",
-            window,
-            kWindowWidth,
-            kWindowHeight);
+        RendererConfig config;
+        config.app_name = "Rey Engine Test";
+        config.window_handle = window;
+        config.window_width = kWindowWidth;
+        config.window_height = kWindowHeight;
+        config.material_strategy = MaterialPipelineStrategy::PBR_Toon_Hybrid; // Testing the hybrid strategy by default
+        
+        auto render_expected = vanta::render::VulkanRenderer::create(config);
 
         if (!render_expected) {
             throw std::runtime_error("レンダラー初期化エラー: " + describe_error(render_expected.error()));

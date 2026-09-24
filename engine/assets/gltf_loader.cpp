@@ -140,6 +140,8 @@ constexpr const char* get_mime_type_string(fastgltf::MimeType mime) {
         }
         if (material.occlusionTexture.has_value()) {
             int32_t img_idx = get_image_index(material.occlusionTexture->textureIndex);
+            mat.occlusion_texture_index = img_idx;
+            mat.occlusion_strength = material.occlusionTexture->strength;
             if (img_idx >= 0 && static_cast<size_t>(img_idx) < scene.images.size()) {
                 scene.images[static_cast<size_t>(img_idx)].is_srgb = false;
             }

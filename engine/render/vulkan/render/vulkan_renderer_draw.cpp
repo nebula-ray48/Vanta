@@ -93,10 +93,12 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
             std::memcpy(&object_data[instance_idx].data[4], &instance.material.pbr.metallic, sizeof(float));
             std::memcpy(&object_data[instance_idx].data[5], &instance.material.pbr.roughness, sizeof(float));
             std::memcpy(&object_data[instance_idx].data[6], &instance.material.pbr.normal_scale, sizeof(float));
-            object_data[instance_idx].data[7] = instance.material.pbr.albedo_texture_id;
-            object_data[instance_idx].data[8] = instance.material.pbr.normal_texture_id;
-            object_data[instance_idx].data[9] = instance.material.pbr.mrm_texture_id;
-            object_data[instance_idx].data[10] = instance.material.pbr.emissive_texture_id;
+            std::memcpy(&object_data[instance_idx].data[7], &instance.material.pbr.occlusion_strength, sizeof(float));
+            object_data[instance_idx].data[8] = instance.material.pbr.albedo_texture_id;
+            object_data[instance_idx].data[9] = instance.material.pbr.normal_texture_id;
+            object_data[instance_idx].data[10] = instance.material.pbr.mrm_texture_id;
+            object_data[instance_idx].data[11] = instance.material.pbr.emissive_texture_id;
+            object_data[instance_idx].data[12] = instance.material.pbr.occlusion_texture_id;
         } else if (instance.material.type == MaterialType::Toon) {
             // Toonペイロード
             // data[0..3] = base_color

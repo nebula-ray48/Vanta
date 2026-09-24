@@ -65,10 +65,12 @@ struct PbrMaterialData {
     float metallic;
     float roughness;
     float normal_scale;
+    float occlusion_strength;
     uint albedo_texture_id;
     uint normal_texture_id;
     uint mrm_texture_id;
     uint emissive_texture_id;
+    uint occlusion_texture_id;
 };
 
 PbrMaterialData unpackPbrMaterial(ObjectData objData) {
@@ -77,10 +79,12 @@ PbrMaterialData unpackPbrMaterial(ObjectData objData) {
     mat.metallic = asfloat(objData.data[4]);
     mat.roughness = asfloat(objData.data[5]);
     mat.normal_scale = asfloat(objData.data[6]);
-    mat.albedo_texture_id = objData.data[7];
-    mat.normal_texture_id = objData.data[8];
-    mat.mrm_texture_id = objData.data[9];
-    mat.emissive_texture_id = objData.data[10];
+    mat.occlusion_strength = asfloat(objData.data[7]);
+    mat.albedo_texture_id = objData.data[8];
+    mat.normal_texture_id = objData.data[9];
+    mat.mrm_texture_id = objData.data[10];
+    mat.emissive_texture_id = objData.data[11];
+    mat.occlusion_texture_id = objData.data[12];
     return mat;
 }
 
@@ -332,7 +336,15 @@ float4 fragmentMain(VertexOutput input) : SV_Target {
     float2 brdf = bindlessTextures[brdfLutID].Sample(defaultSampler, float2(NdotV, roughness)).rg;
     float3 specularIBL = prefilteredColor * (F0 * brdf.x + brdf.y);
 
-    float3 ambient = diffuseIBL + specularIBL;
+    // --- AO (Ambient Occlusion) ---
+    float ao = 1.0;
+    if (matData.occlusion_texture_id != 0) {
+        uint aoID = NonUniformResourceIndex(matData.occlusion_texture_id);
+        float sampledAO = bindlessTextures[aoID].Sample(defaultSampler, input.uv).r;
+        ao = 1.0 + matData.occlusion_strength * (sampledAO - 1.0);
+    }
+
+    float3 ambient = (diffuseIBL + specularIBL) * ao;
 
     // ---------------------------------------------------------
     // 3. エミッシブ (Emissive)

@@ -56,10 +56,7 @@ namespace vanta::render {
     class VulkanRenderer {
     public:
         [[nodiscard]] static std::expected<VulkanRenderer, EngineError> create(
-            const char* app_name,
-            void* window_handle,
-            uint32_t window_width,
-            uint32_t window_height);
+            const RendererConfig& config);
 
 
         ~VulkanRenderer();
@@ -91,6 +88,7 @@ namespace vanta::render {
         [[nodiscard]] GlobalUbo build_global_ubo(const RenderSnapshot& snapshot) const;
 
         // --- サブシステム群 ---
+        RendererConfig config_;
         VulkanContext context_;
         SwapchainTarget swapchain_target_;
         
