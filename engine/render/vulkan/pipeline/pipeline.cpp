@@ -214,22 +214,14 @@ std::expected<VkPipeline, EngineError> PipelineBuilder::build(
         .pScissors = scissors.data()
     };
 
-    // 4. パイプラインレイアウトの設定
-    std::array push_constant_ranges = { VkPushConstantRange{
-        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-        .offset = 0,
-        .size = sizeof(PushConstants),
-    },};
-
-
     VkPipelineLayoutCreateInfo const layout_info{
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .pNext = nullptr,
         .flags = 0,
         .setLayoutCount = static_cast<uint32_t>(descriptor_set_layouts.size()),
         .pSetLayouts = descriptor_set_layouts.data(),
-        .pushConstantRangeCount = static_cast<uint32_t>(push_constant_ranges.size()),
-        .pPushConstantRanges = push_constant_ranges.data()
+        .pushConstantRangeCount = 0,
+        .pPushConstantRanges = nullptr
     };
 
     VkPipelineLayout layout = nullptr;

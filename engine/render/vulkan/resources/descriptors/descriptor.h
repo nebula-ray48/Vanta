@@ -20,6 +20,17 @@ namespace vanta::render {
         float padding;
     };
 
+    /**
+     * @class BindlessDescriptorLayout
+     * @brief Bindlessアーキテクチャのための共通 Descriptor Set 0 のレイアウトを定義します。
+     * 
+     * 全てのシェーダーで共通して使用されるグローバルなリソースをバインドするためのレイアウトです。
+     * 現在のバインディング設計：
+     * - Binding 0 (Uniform Buffer): GlobalUbo (カメラ情報など)
+     * - Binding 1 (Sampled Image) : テクスチャの配列（UpdateAfterBind対応）
+     * - Binding 2 (Sampler)       : 共通サンプラー配列（UpdateAfterBind対応）
+     * - Binding 3 (Storage Buffer): 全オブジェクトの GpuObjectData を格納するSSBO
+     */
     class BindlessDescriptorLayout {
     public:
         [[nodiscard]] static std::expected<VkDescriptorSetLayout, EngineError> create(VkDevice device) noexcept;
@@ -27,6 +38,12 @@ namespace vanta::render {
         static void destroy(VkDevice device, VkDescriptorSetLayout layout) noexcept;
     };
 
+    /**
+     * @class BindlessDescriptorManager
+     * @brief Bindless用の巨大なDescriptor Poolの管理と、Setの割り当て・更新を行います。
+     * 
+     * Draw Callごとの Descriptor Set 切り替えをなくし、GPU-Driven Renderingの基盤を提供します。
+     */
     class BindlessDescriptorManager {
     public:
 

@@ -33,6 +33,13 @@ VulkanRenderer& VulkanRenderer::operator=(VulkanRenderer&& other) noexcept {
         bindless_layout_ = other.bindless_layout_;
         bindless_pool_ = other.bindless_pool_;
         global_bindless_set_ = other.global_bindless_set_;
+        object_buffer_ = std::move(other.object_buffer_);
+        indirect_buffer_ = std::move(other.indirect_buffer_);
+
+        global_vertex_buffer_ = std::move(other.global_vertex_buffer_);
+        global_index_buffer_ = std::move(other.global_index_buffer_);
+        global_vertex_count_ = other.global_vertex_count_;
+        global_index_count_ = other.global_index_count_;
 
         other.context_.device = VK_NULL_HANDLE;
 
@@ -49,10 +56,6 @@ VulkanRenderer::~VulkanRenderer() {
 
     vkDeviceWaitIdle(context_.device);
 
-    for (auto& mesh : meshes_) {
-        mesh.vertex_buffer.destroy(context_);
-        mesh.index_buffer.destroy(context_);
-    }
     meshes_.clear();
 
     for (auto& frame : frames_) {
@@ -62,6 +65,10 @@ VulkanRenderer::~VulkanRenderer() {
     pipeline_.destroy(context_.device);
 
     global_ubo_buffer_.destroy(context_);
+    object_buffer_.destroy(context_);
+    indirect_buffer_.destroy(context_);
+    global_vertex_buffer_.destroy(context_);
+    global_index_buffer_.destroy(context_);
 
     if (bindless_pool_ != VK_NULL_HANDLE) {
         BindlessDescriptorManager::destroy_pool(context_.device, bindless_pool_);
@@ -133,6 +140,10 @@ std::expected<VulkanRenderer, EngineError> VulkanRenderer::create(
     }
     renderer.global_ubo_buffer_ = std::move(*ubo_buffer);
 
+    if (auto draw_result = renderer.initialize_draw_buffers(); !draw_result) {
+        return std::unexpected(draw_result.error());
+    }
+
     if (auto descriptor_result = renderer.initialize_descriptor_resources(); !descriptor_result) {
         return std::unexpected(descriptor_result.error());
     }
@@ -148,36 +159,21 @@ std::expected<VulkanRenderer, EngineError> VulkanRenderer::create(
     return renderer;
 }
 
-    std::expected<void, std::string> vanta::render::VulkanRenderer::load_scene(const std::string& filepath) {
+std::expected<void, std::string> vanta::render::VulkanRenderer::load_scene(const std::string& filepath) {
     auto scene_result = vanta::scene::load_gltf(filepath);
     if (!scene_result.has_value()) {
         return std::unexpected("glTF load failed: " + std::to_string(std::to_underlying(scene_result.error())));
     }
     const auto& scene = scene_result.value();
 
-    size_t vertex_size = scene.vertices.size() * sizeof(scene.vertices[0]);
-    auto vertex_res = upload_buffer_to_gpu(
-        context_.allocator, context_.device,
-        frames_[current_frame_index_].graphics_command_pool, context_.graphics_queue,
-        vertex_size, scene.vertices.data(), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
-    );
-    if (!vertex_res.has_value()) {
-        return std::unexpected("Vertex upload failed: " + vertex_res.error());
-    }
-    vertex_buffer_ = vertex_res.value();
+    std::vector<Vertex> render_vertices(scene.vertices.size());
+    std::memcpy(render_vertices.data(), scene.vertices.data(), scene.vertices.size() * sizeof(Vertex));
 
-    size_t index_size = scene.indices.size() * sizeof(scene.indices[0]);
-    auto index_res = upload_buffer_to_gpu(
-        context_.allocator, context_.device,
-        frames_[current_frame_index_].graphics_command_pool, context_.graphics_queue,
-        index_size, scene.indices.data(), VK_BUFFER_USAGE_INDEX_BUFFER_BIT
-    );
-    if (!index_res.has_value()) {
-        vmaDestroyBuffer(context_.allocator, vertex_buffer_.buffer, vertex_buffer_.allocation);
-        return std::unexpected("Index upload failed: " + index_res.error());
+    MeshData data { std::move(render_vertices), scene.indices };
+    auto mesh_result = create_mesh_from_data(data);
+    if (!mesh_result) {
+        return std::unexpected("Mesh creation failed.");
     }
-    index_buffer_ = index_res.value();
-    index_count_ = static_cast<uint32_t>(scene.indices.size());
 
     return {};
 }

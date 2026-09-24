@@ -59,27 +59,24 @@ Texture2D bindlessTextures[];
 SamplerState defaultSampler;
 
 
-// TODO: 将来的に PushConstants のモデル行列を廃止し、
-// ここに StructuredBuffer<Entity> entities; を置いて
-// SV_InstanceID で一括フェッチするのが理想
-
-struct PushConstants {
-    float4x4 model;
+// --- Set 0: Object Data (SSBO) ---
+struct ObjectData {
+    float4x4 model_matrix;
 };
 
-[[vk::push_constant]]
-ConstantBuffer<PushConstants> push;
-
+[[vk::binding(3, 0)]]
+StructuredBuffer<ObjectData> objectBuffer;
 
 // ==========================================
 // 3. 処理ロジック
 // ==========================================
 
 [shader("vertex")]
-VertexOutput vertexMain(VertexInput input) {
+VertexOutput vertexMain(VertexInput input, uint instance_id : SV_InstanceID) {
     VertexOutput output;
 
-    float4 worldPos = mul(push.model, float4(input.position, 1.0));
+    float4x4 model = objectBuffer[instance_id].model_matrix;
+    float4 worldPos = mul(model, float4(input.position, 1.0));
 
     output.position = mul(globalData.viewProj, worldPos);
 

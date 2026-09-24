@@ -25,6 +25,15 @@ struct GpuBuffer {
     void destroy(const struct VulkanContext& context) noexcept;
 };
 
+/**
+ * @struct VulkanContext
+ * @brief Vulkanのコアリソース（Instance, Device, VMA Allocator）を管理する構造体
+ * 
+ * すべてのVulkanリソース（Buffer, Image, Pipelineなど）を生成・破棄する際に必要な
+ * 基盤となるデバイス情報やアロケータを保持します。
+ * `create_vulkan_context` によって初期化され、必要な拡張機能（Dynamic Renderingなど）
+ * やVulkan 1.3/1.2の機能（Bindless等）を有効化します。
+ */
 struct VulkanContext {
     VkInstance instance{VK_NULL_HANDLE};
     VkSurfaceKHR surface{VK_NULL_HANDLE};

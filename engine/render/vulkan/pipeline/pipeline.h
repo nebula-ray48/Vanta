@@ -15,12 +15,16 @@
 
 namespace vanta::render {
 
-struct PushConstants {
-    float model[16];
-};
-
-// グラフィックスパイプラインを段階的に構築するためのビルダー
-class PipelineBuilder {
+    /**
+     * @class PipelineBuilder
+     * @brief Vulkanのグラフィックスパイプラインを段階的に構築するためのビルダー
+     * 
+     * 複雑な `VkGraphicsPipelineCreateInfo` の設定を抽象化し、メソッドチェーンで
+     * 必要な状態（シェーダー、頂点入力、ビューポートなど）を設定できるようにします。
+     * Vulkan 1.3 の Dynamic Rendering (`VK_KHR_dynamic_rendering`) に対応しており、
+     * RenderPass オブジェクトなしでパイプラインを生成できます。
+     */
+    class PipelineBuilder {
 private:
     std::vector<VkPipelineShaderStageCreateInfo> shader_stages_;
     VkPipelineVertexInputStateCreateInfo vertex_input_info_{};

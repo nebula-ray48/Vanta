@@ -8,7 +8,15 @@
 
 namespace vanta::render::fg {
 
-class PassContext {
+    /**
+     * @class PassContext
+     * @brief Render Graphの各パス実行時に渡されるコンテキスト。
+     * 
+     * コマンドバッファ (`VkCommandBuffer`) や、Virtual Handleから実際の
+     * Vulkanリソース（`VkImage` / `VkBuffer`）を解決するための機能を提供します。
+     * これにより、パスの定義側は物理的なリソースの実態を気にせず描画コマンドを記述できます。
+     */
+    class PassContext {
 public:
     PassContext(VkCommandBuffer cmd, const ResourceRegistry& registry, const std::unordered_map<uint64_t, ImageHandle>& handle_map) noexcept
         : cmd_(cmd), registry_(registry), handle_map_(handle_map) {}

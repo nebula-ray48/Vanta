@@ -51,9 +51,15 @@ namespace vanta::render {
         "VK_LAYER_KHRONOS_validation",
     };
 
+    VkPhysicalDeviceVulkan11Features vk11_features{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
+        .pNext = nullptr,
+        .shaderDrawParameters = VK_TRUE
+    };
+
     VkPhysicalDeviceVulkan12Features vk12_features{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
-        .pNext = nullptr,
+        .pNext = &vk11_features,
         .shaderSampledImageArrayNonUniformIndexing = VK_TRUE,
         .descriptorBindingSampledImageUpdateAfterBind = VK_TRUE,
         .descriptorBindingStorageBufferUpdateAfterBind = VK_TRUE,
@@ -165,7 +171,9 @@ namespace vanta::render {
         }
     }
 
-    constexpr VkPhysicalDeviceFeatures device_features{};
+    constexpr VkPhysicalDeviceFeatures device_features{
+        .multiDrawIndirect = VK_TRUE,
+    };
 
     VkDeviceCreateInfo const device_create_info{
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,

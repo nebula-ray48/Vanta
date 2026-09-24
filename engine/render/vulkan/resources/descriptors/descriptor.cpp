@@ -36,14 +36,22 @@ namespace vanta::render {
             .descriptorCount = 1,
             .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
             .pImmutableSamplers = nullptr
+        },
+        VkDescriptorSetLayoutBinding{
+            .binding = 3,
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .descriptorCount = 1,
+            .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+            .pImmutableSamplers = nullptr
         }
     };
 
     // 各BindingにBindless用のフラグを付与する
-        std::array<VkDescriptorBindingFlags, 3> binding_flags = {
+        std::array<VkDescriptorBindingFlags, 4> binding_flags = {
             0, // UBO doesn't need UPDATE_AFTER_BIND if it's static
             VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT,
-            VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT
+            VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT,
+            0  // SSBO (Static buffer, single binding)
         };
 
         VkDescriptorSetLayoutBindingFlagsCreateInfo flags_info{
@@ -84,6 +92,10 @@ namespace vanta::render {
             },
             VkDescriptorPoolSize{
                 .type = VK_DESCRIPTOR_TYPE_SAMPLER,       // サンプラー用
+                .descriptorCount = 1
+            },
+            VkDescriptorPoolSize{
+                .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, // SSBO用
                 .descriptorCount = 1
             }
         };

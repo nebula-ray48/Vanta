@@ -32,11 +32,26 @@ namespace vanta::render {
 
     /// GPUに転送済みのメッシュデータ
     struct GpuMesh {
-        GpuBuffer vertex_buffer;
-        GpuBuffer index_buffer;
-        uint32_t index_count{};
+        uint32_t first_index;   // グローバルバッファ内のインデックス開始位置
+        uint32_t index_count;   // インデックス数
+        int32_t  vertex_offset; // グローバルバッファ内の頂点開始位置
     };
 
+
+    struct GpuObjectData {
+        glm::mat4 model_matrix;
+    };
+
+    /**
+     * @class VulkanRenderer
+     * @brief Vantaエンジンのメインレンダラークラス
+     *
+     * Vulkanの初期化、リソース管理、描画パスの構築と実行を担当します。
+     * 内部は用途ごとに以下の cpp ファイルに分割して実装されています：
+     * - vulkan_renderer_core.cpp : コンテキストの初期化、破棄、リソース移動管理
+     * - vulkan_renderer_init.cpp : デスクリプタ、パイプライン、バッファなどの初期化ロジック
+     * - vulkan_renderer_draw.cpp : フレームごとの描画ループ、Render Graphの構築と実行
+     */
     class VulkanRenderer {
     public:
         [[nodiscard]] static std::expected<VulkanRenderer, EngineError> create(
@@ -91,9 +106,15 @@ namespace vanta::render {
         ResourceRegistry registry_;
         std::vector<ImageHandle> swapchain_image_handles_;
 
-        AllocatedBuffer vertex_buffer_;
-        AllocatedBuffer index_buffer_;
+        GpuBuffer global_vertex_buffer_;
+        GpuBuffer global_index_buffer_;
+        uint32_t global_vertex_count_ = 0;
+        uint32_t global_index_count_ = 0;
         uint32_t index_count_ = 0;
+
+        GpuBuffer object_buffer_;
+        GpuBuffer indirect_buffer_;
+        [[nodiscard]] std::expected<void, EngineError> initialize_draw_buffers();
     };
 
 }  // namespace vanta::render

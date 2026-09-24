@@ -30,10 +30,47 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
     }
 
     ActiveFrame active_frame = *active_frame_opt;
+
+    // ---------------------------------------------------------
+    // Phase 1: CPU->GPU バッファの更新 (Global UBO)
+    // ---------------------------------------------------------
     if (auto res = update_buffer_data(context_, global_ubo_buffer_, build_global_ubo(snapshot)); !res) {
         return std::unexpected(res.error());
     }
 
+    // ---------------------------------------------------------
+    // Phase 2: CPU->GPU バッファの更新 (Object Data & Indirect Command)
+    // - vmaMapMemoryでメモリをCPU側から見えるようにマップする
+    // - エンティティ(Instance)の数だけループしてデータを書き込む
+    // - vmaUnmapMemoryで変更を確定させる
+    // ---------------------------------------------------------
+    GpuObjectData* object_data = nullptr;
+    VkDrawIndexedIndirectCommand* indirect_cmds = nullptr;
+    vmaMapMemory(context_.allocator, object_buffer_.allocation, (void**)&object_data);
+    vmaMapMemory(context_.allocator, indirect_buffer_.allocation, (void**)&indirect_cmds);
+
+    uint32_t instance_idx = 0;
+    for (const auto& instance : snapshot.instances) {
+        object_data[instance_idx].model_matrix = instance.model_matrix;
+
+        if (instance.mesh_id.value < meshes_.size()) {
+            const auto& mesh = meshes_[instance.mesh_id.value];
+            indirect_cmds[instance_idx].indexCount = mesh.index_count;
+            indirect_cmds[instance_idx].instanceCount = 1;
+            indirect_cmds[instance_idx].firstIndex = mesh.first_index;
+            indirect_cmds[instance_idx].vertexOffset = mesh.vertex_offset;
+            indirect_cmds[instance_idx].firstInstance = instance_idx;
+        }
+        instance_idx++;
+    }
+
+    vmaUnmapMemory(context_.allocator, object_buffer_.allocation);
+    vmaUnmapMemory(context_.allocator, indirect_buffer_.allocation);
+
+    // ---------------------------------------------------------
+    // Phase 3: Render Graph の構築
+    // - Virtual Resource の宣言と Pass の登録を行う
+    // ---------------------------------------------------------
     fg::RenderGraphBuilder graph_builder;
     const fg::ImageHandle swapchain_image = swapchain_image_handles_[active_frame.image_index];
     graph_builder.import_image(
@@ -115,28 +152,29 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
                 0,
                 nullptr);
 
-            for (const auto& instance : snapshot.instances) {
-                vkCmdPushConstants(cmd, pipeline_.layout, VK_SHADER_STAGE_VERTEX_BIT, 0,
-                                   sizeof(glm::mat4), &instance.model_matrix);
-                if (instance.mesh_id.value < meshes_.size()) {
-                    const auto& mesh = meshes_[instance.mesh_id.value];
-                    VkBuffer vertex_buffers[] = {mesh.vertex_buffer.buffer};
-                    VkDeviceSize offsets[] = {0};
-                    vkCmdBindVertexBuffers(cmd, 0, 1, vertex_buffers, offsets);
-                    vkCmdBindIndexBuffer(cmd, mesh.index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-                    vkCmdDrawIndexed(cmd, mesh.index_count, 1, 0, 0, 0);
-                }
+            VkBuffer vertex_buffers[] = {global_vertex_buffer_.buffer};
+            VkDeviceSize offsets[] = {0};
+            vkCmdBindVertexBuffers(cmd, 0, 1, vertex_buffers, offsets);
+            vkCmdBindIndexBuffer(cmd, global_index_buffer_.buffer, 0, VK_INDEX_TYPE_UINT32);
+
+            if (!snapshot.instances.empty()) {
+                vkCmdDrawIndexedIndirect(
+                    cmd, 
+                    indirect_buffer_.buffer, 
+                    0, 
+                    static_cast<uint32_t>(snapshot.instances.size()),
+                    sizeof(VkDrawIndexedIndirectCommand)
+                );
             }
 
             vkCmdEndRendering(cmd);
-
-            if (vertex_buffer_.buffer != VK_NULL_HANDLE && index_count_ > 0) {
-                VkDeviceSize offsets[] = {0};
-                vkCmdBindVertexBuffers(cmd, 0, 1, &vertex_buffer_.buffer, offsets);
-                vkCmdBindIndexBuffer(cmd, index_buffer_.buffer, 0, VK_INDEX_TYPE_UINT32);
-                vkCmdDrawIndexed(cmd, index_count_, 1, 0, 0, 0);
-            }
         });
+
+    // ---------------------------------------------------------
+    // Phase 4: Render Graph のコンパイルと実行
+    // - コンパイラが依存関係を解析し、バリアと実行順序を決定 (plan)
+    // - GraphExecutor が plan に従って実際の Vulkan API を呼び出す
+    // ---------------------------------------------------------
 
     graph_builder.add_pass("PresentPass")
         .read_image(swapchain_image, fg::UsageType::Present);
