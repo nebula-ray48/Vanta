@@ -48,15 +48,36 @@ struct MeshData {
     static MeshData new_plane(float width, float depth, glm::vec3 color);
 };
 
+enum class MaterialType : uint32_t {
+    PBR = 0,
+    Toon = 1
+};
+
+struct PbrMaterialParams {
+    glm::vec4 base_color{1.0f};
+    float metallic = 0.0f;
+    float roughness = 1.0f;
+    uint32_t albedo_texture_id = 0;
+    uint32_t normal_texture_id = 0;
+    uint32_t mrm_texture_id = 0;
+};
+
+struct ToonMaterialParams {
+    glm::vec4 base_color{1.0f};
+    glm::vec4 shade_color{0.5f, 0.5f, 0.5f, 1.0f};
+    float outline_width = 1.0f;
+    float threshold = 0.5f;
+    float feather = 0.1f;
+    uint32_t albedo_texture_id = 0;
+    uint32_t shade_texture_id = 0;
+};
+
 struct MaterialData {
-    glm::vec4 base_color;
-    float metallic;
-    float roughness;
-    uint32_t albedo_texture_id;
-    uint32_t normal_texture_id;
-    uint32_t mrm_texture_id;
-    float _pad0;
-    float _pad1;
+    MaterialType type = MaterialType::PBR;
+
+    // TODO: C++17 std::variant を使用してPBRとToonのパラメータを保持する
+    PbrMaterialParams pbr;
+    ToonMaterialParams toon;
 };
 
 struct RenderInstance {
@@ -70,6 +91,7 @@ struct RenderSnapshot {
     uint64_t frame_number;
     std::vector<RenderInstance> instances;
     glm::mat4 view_matrix;
+    glm::vec3 camera_pos{0.0f, 0.0f, 0.0f};
 };
 
 struct alignas(16) GpuTransform {

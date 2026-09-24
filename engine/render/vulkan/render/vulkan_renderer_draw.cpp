@@ -15,15 +15,31 @@
 
 namespace vanta::render {
 
-GlobalUbo VulkanRenderer::build_global_ubo(const RenderSnapshot& snapshot) {
-    return GlobalUbo{
+GlobalUbo VulkanRenderer::build_global_ubo(const RenderSnapshot& snapshot) const {
+    GlobalUbo ubo{
         .view_proj = snapshot.view_matrix,
-        .camera_pos = glm::vec3(0.0f, 0.0f, 2.0f),
+        .inv_view_proj = glm::inverse(snapshot.view_matrix),
+        .camera_pos = snapshot.camera_pos,
         .padding = 0.0f,
         .sun_direction = glm::vec4(glm::normalize(glm::vec3(0.2f, 0.5f, 1.0f)), 3.0f), // 手前上から照らす
         .sun_color = glm::vec4(1.0f, 1.0f, 0.95f, 1.0f),
         .ambient_color = glm::vec4(0.2f, 0.2f, 0.2f, 1.0f),
+        .sh = {
+            glm::vec4( 1.389567f,  1.609414f,  1.902710f, 0.0f), // L00
+            glm::vec4( 0.036784f,  0.039627f,  0.043386f, 0.0f), // L1-1
+            glm::vec4(-0.084193f, -0.106105f, -0.160369f, 0.0f), // L10
+            glm::vec4( 1.353743f,  1.566089f,  1.847385f, 0.0f), // L11
+            glm::vec4( 0.065199f,  0.074574f,  0.087086f, 0.0f), // L2-2
+            glm::vec4( 0.020387f,  0.023414f,  0.026277f, 0.0f), // L2-1
+            glm::vec4( 0.280597f,  0.325054f,  0.384689f, 0.0f), // L20
+            glm::vec4(-0.096101f, -0.117145f, -0.163413f, 0.0f), // L21
+            glm::vec4( 0.245422f,  0.283225f,  0.332972f, 0.0f)  // L22
+        },
+        .brdf_lut_index = brdf_lut_index_,
+        .max_reflection_lod = 5.0f,
+        ._pad = {0.0f, 0.0f}
     };
+    return ubo;
 }
 
 std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot& snapshot) {
@@ -56,20 +72,37 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
     for (const auto& instance : snapshot.instances) {
         object_data[instance_idx].model_matrix = instance.model_matrix;
         
-        // PBRペイロードとして書き込む
-        // data[0..3] = base_color
-        // data[4] = metallic
-        // data[5] = roughness
-        // data[6] = albedo_texture_id
-        // data[7] = normal_texture_id
-        // data[8] = mrm_texture_id
-        
-        std::memcpy(&object_data[instance_idx].data[0], &instance.material.base_color, sizeof(glm::vec4));
-        std::memcpy(&object_data[instance_idx].data[4], &instance.material.metallic, sizeof(float));
-        std::memcpy(&object_data[instance_idx].data[5], &instance.material.roughness, sizeof(float));
-        object_data[instance_idx].data[6] = instance.material.albedo_texture_id;
-        object_data[instance_idx].data[7] = instance.material.normal_texture_id;
-        object_data[instance_idx].data[8] = instance.material.mrm_texture_id;
+        if (instance.material.type == MaterialType::PBR) {
+            // PBRペイロードとして書き込む
+            // data[0..3] = base_color
+            // data[4] = metallic
+            // data[5] = roughness
+            // data[6] = albedo_texture_id
+            // data[7] = normal_texture_id
+            // data[8] = mrm_texture_id
+            std::memcpy(&object_data[instance_idx].data[0], &instance.material.pbr.base_color, sizeof(glm::vec4));
+            std::memcpy(&object_data[instance_idx].data[4], &instance.material.pbr.metallic, sizeof(float));
+            std::memcpy(&object_data[instance_idx].data[5], &instance.material.pbr.roughness, sizeof(float));
+            object_data[instance_idx].data[6] = instance.material.pbr.albedo_texture_id;
+            object_data[instance_idx].data[7] = instance.material.pbr.normal_texture_id;
+            object_data[instance_idx].data[8] = instance.material.pbr.mrm_texture_id;
+        } else if (instance.material.type == MaterialType::Toon) {
+            // Toonペイロード
+            // data[0..3] = base_color
+            // data[4..7] = shade_color
+            // data[8] = outline_width
+            // data[9] = threshold
+            // data[10] = feather
+            // data[11] = albedo_texture_id
+            // data[12] = shade_texture_id
+            std::memcpy(&object_data[instance_idx].data[0], &instance.material.toon.base_color, sizeof(glm::vec4));
+            std::memcpy(&object_data[instance_idx].data[4], &instance.material.toon.shade_color, sizeof(glm::vec4));
+            std::memcpy(&object_data[instance_idx].data[8], &instance.material.toon.outline_width, sizeof(float));
+            std::memcpy(&object_data[instance_idx].data[9], &instance.material.toon.threshold, sizeof(float));
+            std::memcpy(&object_data[instance_idx].data[10], &instance.material.toon.feather, sizeof(float));
+            object_data[instance_idx].data[11] = instance.material.toon.albedo_texture_id;
+            object_data[instance_idx].data[12] = instance.material.toon.shade_texture_id;
+        }
 
         if (instance.mesh_id.value < meshes_.size()) {
             const auto& mesh = meshes_[instance.mesh_id.value];
@@ -139,7 +172,6 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
             };
 
             vkCmdBeginRendering(cmd, &rendering_info);
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_.pipeline);
 
             const VkViewport viewport{
                 .x = 0.0f,
@@ -163,7 +195,7 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
             vkCmdBindDescriptorSets(
                 cmd,
                 VK_PIPELINE_BIND_POINT_GRAPHICS,
-                pipeline_.layout,
+                pipeline_layout_,
                 0,
                 static_cast<uint32_t>(bound_sets.size()),
                 bound_sets.data(),
@@ -176,6 +208,11 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
             vkCmdBindIndexBuffer(cmd, global_index_buffer_.buffer, 0, VK_INDEX_TYPE_UINT32);
 
             if (!snapshot.instances.empty()) {
+                // TODO: 実際は PBR, Toon, ToonOutline ごとにインスタンスをソートするか
+                // IndirectCommand のオフセットを計算して、複数回 vkCmdDrawIndexedIndirect を呼び出す必要がある。
+                // 現在は全て PBR として一括描画する
+                
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pbr_pipeline_.pipeline);
                 vkCmdDrawIndexedIndirect(
                     cmd, 
                     indirect_buffer_.buffer, 
@@ -183,6 +220,12 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
                     static_cast<uint32_t>(snapshot.instances.size()),
                     sizeof(VkDrawIndexedIndirectCommand)
                 );
+            }
+
+            // Skybox描画
+            if (skybox_pipeline_.pipeline != VK_NULL_HANDLE) {
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, skybox_pipeline_.pipeline);
+                vkCmdDraw(cmd, 3, 1, 0, 0); // 頂点バッファなしでフルスクリーン三角形を描画
             }
 
             vkCmdEndRendering(cmd);

@@ -38,7 +38,17 @@ namespace vanta::vulkan {
             VkPhysicalDevice physical_device,
             VkCommandPool command_pool,
             VkQueue graphics_queue,
-            const RawImage& image
+            const RawImage& image,
+            VkFormat format
+        );
+
+        friend std::expected<Texture, VulkanError> create_cubemap_from_hdr_mips(
+            VkDevice device,
+            VkPhysicalDevice physical_device,
+            VkCommandPool command_pool,
+            VkQueue graphics_queue,
+            const std::filesystem::path& base_dir,
+            uint32_t mip_count
         );
 
         Texture() = default;
@@ -56,7 +66,17 @@ namespace vanta::vulkan {
         VkPhysicalDevice physical_device,
         VkCommandPool command_pool,
         VkQueue graphics_queue,
-        const RawImage& image
+        const RawImage& image,
+        VkFormat format = VK_FORMAT_R8G8B8A8_SRGB
+    );
+
+    [[nodiscard]] std::expected<Texture, VulkanError> create_cubemap_from_hdr_mips(
+        VkDevice device,
+        VkPhysicalDevice physical_device,
+        VkCommandPool command_pool,
+        VkQueue graphics_queue,
+        const std::filesystem::path& base_dir,
+        uint32_t mip_count = 6
     );
 
     class BindlessManager {

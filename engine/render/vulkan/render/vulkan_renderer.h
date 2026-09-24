@@ -87,12 +87,19 @@ namespace vanta::render {
         [[nodiscard]] std::expected<void, EngineError> end_frame(const ActiveFrame& active_frame);
         [[nodiscard]] std::expected<void, EngineError> initialize_descriptor_resources();
         [[nodiscard]] std::expected<void, EngineError> initialize_pipeline_resources();
-        [[nodiscard]] static GlobalUbo build_global_ubo(const RenderSnapshot& snapshot);
+        [[nodiscard]] GlobalUbo build_global_ubo(const RenderSnapshot& snapshot) const;
 
         // --- サブシステム群 ---
         VulkanContext context_;
         SwapchainTarget swapchain_target_;
-        GraphicsPipeline pipeline_;
+        
+        // パイプライン群 (全て同じPipelineLayoutを共有)
+        VkPipelineLayout pipeline_layout_{VK_NULL_HANDLE};
+        GraphicsPipeline pbr_pipeline_;
+        GraphicsPipeline toon_pipeline_;
+        GraphicsPipeline toon_outline_pipeline_;
+        GraphicsPipeline skybox_pipeline_;
+        
         std::array<FrameContext, MAX_FRAMES_IN_FLIGHT> frames_;
         uint32_t current_frame_index_{0};
 
@@ -108,6 +115,8 @@ namespace vanta::render {
 
         std::expected<void, EngineError> initialize_textures();
         std::vector<vanta::vulkan::Texture> textures_;
+        std::optional<vanta::vulkan::Texture> env_cubemap_;
+        uint32_t brdf_lut_index_ = 0;
         [[nodiscard]] FrameContext& current_frame() noexcept { return frames_[current_frame_index_]; }
 
         ResourceRegistry registry_;

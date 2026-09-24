@@ -30,7 +30,11 @@ VulkanRenderer& VulkanRenderer::operator=(VulkanRenderer&& other) noexcept {
         registry_ = std::move(other.registry_);
         swapchain_image_handles_ = std::move(other.swapchain_image_handles_);
         global_ubo_buffer_ = std::move(other.global_ubo_buffer_);
-        pipeline_ = std::move(other.pipeline_);
+        pipeline_layout_ = other.pipeline_layout_;
+        pbr_pipeline_ = std::move(other.pbr_pipeline_);
+        toon_pipeline_ = std::move(other.toon_pipeline_);
+        toon_outline_pipeline_ = std::move(other.toon_outline_pipeline_);
+        skybox_pipeline_ = std::move(other.skybox_pipeline_);
         bindless_layout_ = other.bindless_layout_;
         bindless_pool_ = other.bindless_pool_;
         global_bindless_set_ = other.global_bindless_set_;
@@ -41,12 +45,16 @@ VulkanRenderer& VulkanRenderer::operator=(VulkanRenderer&& other) noexcept {
         global_index_buffer_ = std::move(other.global_index_buffer_);
         global_vertex_count_ = other.global_vertex_count_;
         global_index_count_ = other.global_index_count_;
+        index_count_ = other.index_count_;
         textures_ = std::move(other.textures_);
+        env_cubemap_ = std::move(other.env_cubemap_);
+        brdf_lut_index_ = other.brdf_lut_index_;
 
         other.context_.device = VK_NULL_HANDLE;
-
+        other.pipeline_layout_ = VK_NULL_HANDLE;
         other.bindless_layout_ = VK_NULL_HANDLE;
         other.bindless_pool_ = VK_NULL_HANDLE;
+        other.global_bindless_set_ = VK_NULL_HANDLE;
     }
     return *this;
 }
@@ -64,7 +72,15 @@ VulkanRenderer::~VulkanRenderer() {
         frame.destroy(context_);
     }
     swapchain_target_.destroy(context_.device);
-    pipeline_.destroy(context_.device);
+    
+    pbr_pipeline_.destroy(context_.device);
+    toon_pipeline_.destroy(context_.device);
+    toon_outline_pipeline_.destroy(context_.device);
+    skybox_pipeline_.destroy(context_.device);
+    if (pipeline_layout_ != VK_NULL_HANDLE) {
+        vkDestroyPipelineLayout(context_.device, pipeline_layout_, nullptr);
+        pipeline_layout_ = VK_NULL_HANDLE;
+    }
 
     global_ubo_buffer_.destroy(context_);
     object_buffer_.destroy(context_);
@@ -83,6 +99,7 @@ VulkanRenderer::~VulkanRenderer() {
 
     registry_.clear_pool(context_);
     textures_.clear();
+    env_cubemap_.reset();
 
     context_.destroy();
     std::cout << "VulkanRenderer child objects destroyed cleanly.\n";
@@ -215,17 +232,18 @@ std::expected<std::vector<vanta::render::VulkanRenderer::LoadedSceneNode>, std::
     std::vector<MaterialData> loaded_materials;
     for (const auto& mat : scene.materials) {
         MaterialData mat_data{};
-        mat_data.base_color = mat.base_color_factor;
-        mat_data.metallic = mat.metallic_factor;
-        mat_data.roughness = mat.roughness_factor;
+        mat_data.type = MaterialType::PBR;
+        mat_data.pbr.base_color = mat.base_color_factor;
+        mat_data.pbr.metallic = mat.metallic_factor;
+        mat_data.pbr.roughness = mat.roughness_factor;
         
-        mat_data.albedo_texture_id = mat.base_color_texture_index >= 0 && mat.base_color_texture_index < loaded_texture_ids.size() 
+        mat_data.pbr.albedo_texture_id = mat.base_color_texture_index >= 0 && mat.base_color_texture_index < loaded_texture_ids.size() 
             ? loaded_texture_ids[mat.base_color_texture_index] : 0;
             
-        mat_data.normal_texture_id = mat.normal_texture_index >= 0 && mat.normal_texture_index < loaded_texture_ids.size() 
+        mat_data.pbr.normal_texture_id = mat.normal_texture_index >= 0 && mat.normal_texture_index < loaded_texture_ids.size() 
             ? loaded_texture_ids[mat.normal_texture_index] : 0;
             
-        mat_data.mrm_texture_id = mat.metallic_roughness_texture_index >= 0 && mat.metallic_roughness_texture_index < loaded_texture_ids.size() 
+        mat_data.pbr.mrm_texture_id = mat.metallic_roughness_texture_index >= 0 && mat.metallic_roughness_texture_index < loaded_texture_ids.size() 
             ? loaded_texture_ids[mat.metallic_roughness_texture_index] : 0;
 
         loaded_materials.push_back(mat_data);
@@ -263,7 +281,9 @@ std::expected<std::vector<vanta::render::VulkanRenderer::LoadedSceneNode>, std::
     if (!loaded_materials.empty()) {
         root_node.material = loaded_materials[0];
     } else {
-        root_node.material = MaterialData{ .base_color = glm::vec4(1.0f), .metallic = 0.0f, .roughness = 1.0f };
+        root_node.material = MaterialData{};
+        root_node.material.type = MaterialType::PBR;
+        root_node.material.pbr = PbrMaterialParams{ .base_color = glm::vec4(1.0f), .metallic = 0.0f, .roughness = 1.0f };
     }
     nodes.push_back(root_node);
 

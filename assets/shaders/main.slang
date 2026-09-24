@@ -30,11 +30,16 @@ struct VertexOutput {
 // --- Set 0: グローバルデータ ---
 struct GlobalUbo {
     float4x4 viewProj;
+    float4x4 invViewProj;
     float3 cameraPos;
     float _padding;
     float4 sunDirection; // w = intensity
     float4 sunColor;
     float4 ambientColor;
+    float4 sh[9];
+    uint brdfLutIndex;
+    float maxReflectionLod;
+    float2 _pad;
 };
 
 [[vk::binding(0, 0)]]
@@ -46,7 +51,6 @@ Texture2D bindlessTextures[];
 
 [[vk::binding(2, 0)]]
 SamplerState defaultSampler;
-
 
 // --- Set 0: Object Data (SSBO) ---
 struct ObjectData {
@@ -77,10 +81,30 @@ PbrMaterialData unpackPbrMaterial(ObjectData objData) {
 [[vk::binding(3, 0)]]
 StructuredBuffer<ObjectData> objectBuffer;
 
+// --- Set 0: IBL リソース ---
+[[vk::binding(4, 0)]]
+SamplerCube envCubemap;
+
 // ==========================================
-// 3. PBR Helper Functions
+// 3. PBR & IBL Helper Functions
 // ==========================================
 static const float PI = 3.14159265359;
+
+float3 evaluateSphericalHarmonics(float3 N) {
+    // L0
+    float3 c = globalData.sh[0].rgb;
+    // L1
+    c += globalData.sh[1].rgb * N.y;
+    c += globalData.sh[2].rgb * N.z;
+    c += globalData.sh[3].rgb * N.x;
+    // L2
+    c += globalData.sh[4].rgb * (N.x * N.y);
+    c += globalData.sh[5].rgb * (N.y * N.z);
+    c += globalData.sh[6].rgb * (3.0 * N.z * N.z - 1.0);
+    c += globalData.sh[7].rgb * (N.x * N.z);
+    c += globalData.sh[8].rgb * (N.x * N.x - N.y * N.y);
+    return max(c, float3(0.0));
+}
 
 float DistributionGGX(float3 N, float3 H, float roughness) {
     float a = roughness * roughness;
@@ -118,6 +142,10 @@ float3 FresnelSchlick(float cosTheta, float3 F0) {
     return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
+float3 FresnelSchlickRoughness(float cosTheta, float3 F0, float roughness) {
+    return F0 + (max(float3(1.0 - roughness), F0) - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
+}
+
 // ==========================================
 // 4. 処理ロジック
 // ==========================================
@@ -151,61 +179,82 @@ float4 fragmentMain(VertexOutput input) : SV_Target {
     float3 albedo = matData.base_color.rgb * input.color;
 
     if (matData.albedo_texture_id != 0) {
-        // Texture ID 0 is reserved or fallback, assume > 0 means valid bindless texture index
         uint texID = NonUniformResourceIndex(matData.albedo_texture_id);
         float4 texColor = bindlessTextures[texID].Sample(defaultSampler, input.uv);
         albedo *= texColor.rgb;
     }
 
     float metallic = matData.metallic;
-        float roughness = matData.roughness;
+    float roughness = matData.roughness;
 
-        // MRMテクスチャの適用 (glTF標準: G = Roughness, B = Metallic)
-        if (matData.mrm_texture_id != 0) {
-            uint mrmID = NonUniformResourceIndex(matData.mrm_texture_id);
-            float4 mrmColor = bindlessTextures[mrmID].Sample(defaultSampler, input.uv);
-            roughness *= mrmColor.g;
-            metallic  *= mrmColor.b;
-        }
+    // MRMテクスチャの適用 (glTF標準: G = Roughness, B = Metallic)
+    if (matData.mrm_texture_id != 0) {
+        uint mrmID = NonUniformResourceIndex(matData.mrm_texture_id);
+        float4 mrmColor = bindlessTextures[mrmID].Sample(defaultSampler, input.uv);
+        roughness *= mrmColor.g;
+        metallic  *= mrmColor.b;
+    }
 
     float3 N = normalize(input.normalDir);
     float3 V = normalize(globalData.cameraPos - input.worldPos);
+    float NdotV = max(dot(N, V), 0.0);
 
     // 反射率の初期値 (F0)
     float3 F0 = float3(0.04);
     F0 = lerp(F0, albedo, metallic);
 
-    // Directional Light
+    // ---------------------------------------------------------
+    // 1. 直接光 (Directional Sun Light)
+    // ---------------------------------------------------------
     float3 L = normalize(globalData.sunDirection.xyz);
     float3 H = normalize(V + L);
     float3 radiance = globalData.sunColor.rgb * globalData.sunDirection.w;
 
-    // Cook-Torrance BRDF
     float NDF = DistributionGGX(N, H, roughness);
     float G   = GeometrySmith(N, V, L, roughness);
     float3 F  = FresnelSchlick(max(dot(H, V), 0.0), F0);
 
     float3 numerator    = NDF * G * F;
-    float denominator = 4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0) + 0.0001;
-    float3 specular = numerator / denominator;
+    float denominator = 4.0 * NdotV * max(dot(N, L), 0.0) + 0.0001;
+    float3 specularDirect = numerator / denominator;
 
-    float3 kS = F;
-    float3 kD = float3(1.0) - kS;
-    kD *= 1.0 - metallic;
+    float3 kS_direct = F;
+    float3 kD_direct = (float3(1.0) - kS_direct) * (1.0 - metallic);
 
     float NdotL = max(dot(N, L), 0.0);
-    float3 Lo = (kD * albedo / PI + specular) * radiance * NdotL;
+    float3 directLight = (kD_direct * albedo / PI + specularDirect) * radiance * NdotL;
 
-    // 環境光 (本来はIBLを使うが、仮対応として少しalbedoを混ぜる)
-    float3 ambient = globalData.ambientColor.rgb * albedo * globalData.ambientColor.a;
-    ambient += (albedo * 0.1) * (1.0 + metallic); // IBLがないためのハック
+    // ---------------------------------------------------------
+    // 2. 環境光 (Image-Based Lighting / IBL)
+    // ---------------------------------------------------------
+    // (A) Diffuse Irradiance (Spherical Harmonics)
+    float3 F_ambient = FresnelSchlickRoughness(NdotV, F0, roughness);
+    float3 kS_ambient = F_ambient;
+    float3 kD_ambient = (float3(1.0) - kS_ambient) * (1.0 - metallic);
 
-    float3 color = ambient + Lo;
+    float3 irradiance = evaluateSphericalHarmonics(N);
+    float3 diffuseIBL = irradiance * albedo * kD_ambient;
 
-    // HDR トーンマッピングとガンマ補正
+    // (B) Specular Radiance (Prefiltered Cubemap + BRDF LUT)
+    float3 R = reflect(-V, N);
+    float lod = roughness * globalData.maxReflectionLod;
+    float3 prefilteredColor = envCubemap.SampleLevel(R, lod).rgb;
+
+    uint brdfLutID = NonUniformResourceIndex(globalData.brdfLutIndex);
+    float2 brdf = bindlessTextures[brdfLutID].Sample(defaultSampler, float2(NdotV, roughness)).rg;
+    float3 specularIBL = prefilteredColor * (F0 * brdf.x + brdf.y);
+
+    float3 ambient = diffuseIBL + specularIBL;
+
+    // ---------------------------------------------------------
+    // 3. 最終合成 & トーンマッピング
+    // ---------------------------------------------------------
+    float3 color = directLight + ambient;
+
+    // HDR トーンマッピング (Reinhard) と ガンマ補正
     color = color / (color + float3(1.0));
-    color = pow(color, float3(1.0/2.2));
-
+    color = pow(color, float3(1.0 / 2.2));
 
     return float4(color, matData.base_color.a);
+
 }

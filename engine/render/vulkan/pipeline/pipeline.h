@@ -59,6 +59,24 @@ public:
         return *this;
     }
 
+    PipelineBuilder& with_cull_mode(VkCullModeFlags cull_mode, VkFrontFace front_face) noexcept {
+        rasterizer_.cullMode = cull_mode;
+        rasterizer_.frontFace = front_face;
+        return *this;
+    }
+
+    PipelineBuilder& with_depth_test(VkBool32 depth_test_enable, VkBool32 depth_write_enable, VkCompareOp compare_op) noexcept {
+        depth_stencil_.depthTestEnable = depth_test_enable;
+        depth_stencil_.depthWriteEnable = depth_write_enable;
+        depth_stencil_.depthCompareOp = compare_op;
+        return *this;
+    }
+
+    PipelineBuilder& with_color_blend(const VkPipelineColorBlendAttachmentState& blend) noexcept {
+        color_blend_attachment_ = blend;
+        return *this;
+    }
+
     // パイプライン生成
     [[nodiscard]] std::expected<VkPipeline, EngineError> build(
         VkDevice device,
@@ -68,20 +86,12 @@ public:
     ) const noexcept;
 };
 
-struct GraphicsPipeline {
-    VkPipelineLayout layout{VK_NULL_HANDLE};
-    VkPipeline pipeline{VK_NULL_HANDLE};
+// ユーティリティ
+[[nodiscard]] std::expected<std::vector<char>, EngineError> read_shader_file(const std::string& filename) noexcept;
+[[nodiscard]] std::expected<VkShaderModule, EngineError> create_shader_module(VkDevice device, std::span<const char> code) noexcept;
 
-    // 静的ファクトリ関数
-    [[nodiscard]] static std::expected<GraphicsPipeline, EngineError> create(
-    VkDevice device,
-    VkFormat color_attachment_format,
-    VkFormat depth_attachment_format,
-    VkExtent2D extent,
-    std::span<const VkDescriptorSetLayout> descriptor_set_layouts,
-    const VkVertexInputBindingDescription& binding_desc,
-    std::span<const VkVertexInputAttributeDescription> attrib_desc
-) noexcept;
+struct GraphicsPipeline {
+    VkPipeline pipeline{VK_NULL_HANDLE};
 
     void destroy(VkDevice device) const noexcept;
 };

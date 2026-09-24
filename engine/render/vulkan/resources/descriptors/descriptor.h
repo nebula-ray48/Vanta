@@ -16,11 +16,16 @@ namespace vanta::render {
 
     struct alignas(16) GlobalUbo {
         glm::mat4 view_proj;
+        glm::mat4 inv_view_proj;
         glm::vec3 camera_pos;
         float padding;
         glm::vec4 sun_direction;
         glm::vec4 sun_color;
         glm::vec4 ambient_color;
+        glm::vec4 sh[9];
+        uint32_t brdf_lut_index;
+        float max_reflection_lod;
+        float _pad[2];
     };
 
     /**
@@ -29,10 +34,11 @@ namespace vanta::render {
      * 
      * 全てのシェーダーで共通して使用されるグローバルなリソースをバインドするためのレイアウトです。
      * 現在のバインディング設計：
-     * - Binding 0 (Uniform Buffer): GlobalUbo (カメラ情報など)
-     * - Binding 1 (Sampled Image) : テクスチャの配列（UpdateAfterBind対応）
-     * - Binding 2 (Sampler)       : 共通サンプラー配列（UpdateAfterBind対応）
-     * - Binding 3 (Storage Buffer): 全オブジェクトの GpuObjectData を格納するSSBO
+     * - Binding 0 (Uniform Buffer)         : GlobalUbo (カメラ情報、SH係数など)
+     * - Binding 1 (Sampled Image)          : 2Dテクスチャの配列（UpdateAfterBind対応）
+     * - Binding 2 (Sampler)                : 共通サンプラー
+     * - Binding 3 (Storage Buffer)         : 全オブジェクトの GpuObjectData を格納するSSBO
+     * - Binding 4 (Combined Image Sampler) : IBL キューブマップ (SamplerCube)
      */
     class BindlessDescriptorLayout {
     public:
@@ -44,15 +50,11 @@ namespace vanta::render {
     /**
      * @class BindlessDescriptorManager
      * @brief Bindless用の巨大なDescriptor Poolの管理と、Setの割り当て・更新を行います。
-     * 
-     * Draw Callごとの Descriptor Set 切り替えをなくし、GPU-Driven Renderingの基盤を提供します。
      */
     class BindlessDescriptorManager {
     public:
-
         [[nodiscard]] static std::expected<VkDescriptorPool, EngineError> create_pool(VkDevice device) noexcept;
 
-        // Poolの破棄
         static void destroy_pool(VkDevice device, VkDescriptorPool pool) noexcept;
 
         [[nodiscard]] static std::expected<VkDescriptorSet, EngineError> allocate_set(
@@ -65,6 +67,12 @@ namespace vanta::render {
             VkDescriptorSet set,
             VkBuffer ubo_buffer,
             size_t ubo_size) noexcept;
+
+        static void update_cubemap(
+            VkDevice device,
+            VkDescriptorSet set,
+            VkImageView cubemap_view,
+            VkSampler cubemap_sampler) noexcept;
     };
 
 }  // namespace vanta::render

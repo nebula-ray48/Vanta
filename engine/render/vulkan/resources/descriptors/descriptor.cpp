@@ -43,15 +43,23 @@ namespace vanta::render {
             .descriptorCount = 1,
             .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
             .pImmutableSamplers = nullptr
+        },
+        VkDescriptorSetLayoutBinding{
+            .binding = 4,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .descriptorCount = 1,
+            .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+            .pImmutableSamplers = nullptr
         }
     };
 
     // 各BindingにBindless用のフラグを付与する
-        std::array<VkDescriptorBindingFlags, 4> binding_flags = {
-            0, // UBO doesn't need UPDATE_AFTER_BIND if it's static
+        std::array<VkDescriptorBindingFlags, 5> binding_flags = {
+            0, // UBO
             VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT,
             VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT,
-            0  // SSBO (Static buffer, single binding)
+            0, // SSBO
+            VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT  // Combined Cubemap Sampler
         };
 
         VkDescriptorSetLayoutBindingFlagsCreateInfo flags_info{
@@ -87,7 +95,7 @@ namespace vanta::render {
                 .descriptorCount = 1
             },
             VkDescriptorPoolSize{
-                .type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, // 画像用
+                .type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, // 2D画像用
                 .descriptorCount = MAX_BINDLESS_RESOURCES
             },
             VkDescriptorPoolSize{
@@ -96,6 +104,10 @@ namespace vanta::render {
             },
             VkDescriptorPoolSize{
                 .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, // SSBO用
+                .descriptorCount = 1
+            },
+            VkDescriptorPoolSize{
+                .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, // IBL Cubemap用
                 .descriptorCount = 1
             }
         };
@@ -172,6 +184,31 @@ void BindlessDescriptorManager::update_ubo(
     };
 
     vkUpdateDescriptorSets(device, 1, &descriptor_write, 0, nullptr);
+}
+
+void BindlessDescriptorManager::update_cubemap(
+    VkDevice device,
+    VkDescriptorSet set,
+    VkImageView cubemap_view,
+    VkSampler cubemap_sampler) noexcept
+{
+    VkDescriptorImageInfo image_info{
+        .sampler = cubemap_sampler,
+        .imageView = cubemap_view,
+        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+    };
+
+    VkWriteDescriptorSet write_combined{
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = set,
+        .dstBinding = 4,
+        .dstArrayElement = 0,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .pImageInfo = &image_info,
+    };
+
+    vkUpdateDescriptorSets(device, 1, &write_combined, 0, nullptr);
 }
 
 }  // namespace vanta::render

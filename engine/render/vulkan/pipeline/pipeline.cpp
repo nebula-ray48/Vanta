@@ -9,39 +9,37 @@
 
 namespace vanta::render {
 
-namespace {
-    [[nodiscard]] std::expected<std::vector<char>, EngineError> read_file(const std::string& filename) noexcept {
-        std::ifstream file(filename, std::ios::ate | std::ios::binary);
-        if (!file.is_open()) {
-            return std::unexpected(LegacyError("ファイルの読み込みに失敗しました: " + filename));
-        }
-
-        size_t const file_size = static_cast<size_t>(file.tellg());
-        std::vector<char> buffer(file_size);
-        file.seekg(0);
-        file.read(buffer.data(), static_cast<std::streamsize>(file_size));
-        file.close();
-
-        return buffer;
+std::expected<std::vector<char>, EngineError> read_shader_file(const std::string& filename) noexcept {
+    std::ifstream file(filename, std::ios::ate | std::ios::binary);
+    if (!file.is_open()) {
+        return std::unexpected(LegacyError("ファイルの読み込みに失敗しました: " + filename));
     }
 
-    [[nodiscard]] std::expected<VkShaderModule, EngineError> create_shader_module(
-        VkDevice device,
-        std::span<const char> code
-    ) noexcept {
-        VkShaderModuleCreateInfo const create_info{
-            .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-            .codeSize = code.size(),
-            .pCode = reinterpret_cast<const uint32_t*>(code.data())
-        };
+    size_t const file_size = static_cast<size_t>(file.tellg());
+    std::vector<char> buffer(file_size);
+    file.seekg(0);
+    file.read(buffer.data(), static_cast<std::streamsize>(file_size));
+    file.close();
 
-        VkShaderModule shader_module;
-        if (vkCreateShaderModule(device, &create_info, nullptr, &shader_module) != VK_SUCCESS) {
-            return std::unexpected(LegacyError("シェーダーモジュールの生成に失敗しました"));
-        }
-        return shader_module;
+    return buffer;
+}
+
+std::expected<VkShaderModule, EngineError> create_shader_module(
+    VkDevice device,
+    std::span<const char> code
+) noexcept {
+    VkShaderModuleCreateInfo const create_info{
+        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .codeSize = code.size(),
+        .pCode = reinterpret_cast<const uint32_t*>(code.data())
+    };
+
+    VkShaderModule shader_module;
+    if (vkCreateShaderModule(device, &create_info, nullptr, &shader_module) != VK_SUCCESS) {
+        return std::unexpected(LegacyError("シェーダーモジュールの生成に失敗しました"));
     }
-} // namespace
+    return shader_module;
+}
 
 PipelineBuilder::PipelineBuilder() noexcept {
     input_assembly_ = {
@@ -147,117 +145,10 @@ std::expected<VkPipeline, EngineError> PipelineBuilder::build(
     return pipeline;
 }
 
-    std::expected<GraphicsPipeline, EngineError> GraphicsPipeline::create(
-    VkDevice device,
-    VkFormat color_attachment_format,
-    VkFormat depth_attachment_format,
-    VkExtent2D extent,
-    std::span<const VkDescriptorSetLayout> descriptor_set_layouts,
-    const VkVertexInputBindingDescription& binding_desc,
-    std::span<const VkVertexInputAttributeDescription> attrib_desc
-) noexcept {
-
-    // 1. シェーダーの読み込みとモジュール生成
-    auto vert_spv = read_file("assets/shaders/main_vert.spv");
-    if (!vert_spv) { return std::unexpected(vert_spv.error()); }
-
-    auto frag_spv = read_file("assets/shaders/main_frag.spv");
-    if (!frag_spv) { return std::unexpected(frag_spv.error()); }
-
-    auto vert_module = create_shader_module(device, vert_spv.value());
-    if (!vert_module) { return std::unexpected(vert_module.error()); }
-
-    auto frag_module = create_shader_module(device, frag_spv.value());
-    if (!frag_module) {
-        vkDestroyShaderModule(device, vert_module.value(), nullptr);
-        return std::unexpected(frag_module.error());
-    }
-
-    std::vector<VkPipelineShaderStageCreateInfo> shader_stages = {
-        {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            .stage = VK_SHADER_STAGE_VERTEX_BIT,
-            .module = vert_module.value(),
-            .pName = "main"
-        },
-        {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-            .module = frag_module.value(),
-            .pName = "main"
-        }
-    };
-
-    VkPipelineVertexInputStateCreateInfo const vertex_input{
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-        .vertexBindingDescriptionCount = 1,
-        .pVertexBindingDescriptions = &binding_desc,
-        .vertexAttributeDescriptionCount = static_cast<uint32_t>(attrib_desc.size()),
-        .pVertexAttributeDescriptions = attrib_desc.data()
-    };
-
-    std::array viewports = { VkViewport{
-        .x = 0.0f, .y = 0.0f,
-        .width = static_cast<float>(extent.width), .height = static_cast<float>(extent.height),
-        .minDepth = 0.0f, .maxDepth = 1.0f
-    }};
-
-    std::array scissors = { VkRect2D{
-        .offset = {0, 0}, .extent = extent
-    }};
-
-    VkPipelineViewportStateCreateInfo const viewport_state{
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-        .viewportCount = 1,
-        .pViewports = viewports.data(),
-        .scissorCount = 1,
-        .pScissors = scissors.data()
-    };
-
-    VkPipelineLayoutCreateInfo const layout_info{
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .pNext = nullptr,
-        .flags = 0,
-        .setLayoutCount = static_cast<uint32_t>(descriptor_set_layouts.size()),
-        .pSetLayouts = descriptor_set_layouts.data(),
-        .pushConstantRangeCount = 0,
-        .pPushConstantRanges = nullptr
-    };
-
-    VkPipelineLayout layout = nullptr;
-    if (vkCreatePipelineLayout(device, &layout_info, nullptr, &layout) != VK_SUCCESS) {
-        vkDestroyShaderModule(device, vert_module.value(), nullptr);
-        vkDestroyShaderModule(device, frag_module.value(), nullptr);
-        return std::unexpected(EngineError{LegacyError{"PipelineLayout生成失敗"}});
-    }
-
-    PipelineBuilder builder;
-    std::array color_formats = { color_attachment_format };
-
-    auto pipeline_result = builder
-        .with_shaders(std::move(shader_stages))
-        .with_vertex_input(vertex_input)
-        .with_viewport_state(viewport_state)
-        .with_layout(layout)
-        .build(device, color_formats, depth_attachment_format);
-
-    vkDestroyShaderModule(device, vert_module.value(), nullptr);
-    vkDestroyShaderModule(device, frag_module.value(), nullptr);
-
-    if (!pipeline_result) {
-        vkDestroyPipelineLayout(device, layout, nullptr);
-        return std::unexpected(pipeline_result.error());
-    }
-
-    return GraphicsPipeline{ layout, pipeline_result.value() };
-}
 
 void GraphicsPipeline::destroy(VkDevice device) const noexcept {
     if (pipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(device, pipeline, nullptr);
-    }
-    if (layout != VK_NULL_HANDLE) {
-        vkDestroyPipelineLayout(device, layout, nullptr);
     }
 }
 

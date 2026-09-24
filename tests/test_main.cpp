@@ -99,28 +99,44 @@ int main() {
             float delta_time = 0.016f; // TODO 仮のデルタタイム（後でタイマーを作ります）
             camera = vanta::scene::update_camera(camera, input_state, delta_time);
 
-           RenderSnapshot snapshot{};
+            RenderSnapshot snapshot{};
             snapshot.frame_number = frame_count++;
+            snapshot.camera_pos = camera.position;
 
             snapshot.view_matrix = vanta::scene::compute_projection_matrix(camera) *
                                    vanta::scene::compute_view_matrix(camera);
 
-            // 床のインスタンス情報を追加
-            RenderInstance floor_instance{};
-            floor_instance.entity_id = {0};
-            floor_instance.mesh_id = floor_mesh_id;
-            floor_instance.model_matrix = glm::mat4(1.0f);
-            snapshot.instances.push_back(floor_instance);
+            // DamagedHelmet を描画
+            static bool scene_loaded = false;
+            static std::vector<vanta::render::VulkanRenderer::LoadedSceneNode> helmet_nodes;
+            
+            if (!scene_loaded) {
+                auto nodes_res = render.load_scene("assets/models/DamagedHelmet/DamagedHelmet.gltf");
+                if (nodes_res) {
+                    helmet_nodes = *nodes_res;
+                    std::cout << "Successfully loaded DamagedHelmet.gltf\n";
+                } else {
+                    std::cerr << "Failed to load DamagedHelmet: " << nodes_res.error() << "\n";
+                }
+                scene_loaded = true;
+            }
 
-            // キューブのインスタンス情報を追加
             float time = static_cast<float>(glfwGetTime());
-            RenderInstance cube_instance{};
-            cube_instance.entity_id = {1};
-            cube_instance.mesh_id = cube_mesh_id;
-            glm::mat4 cube_model = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.5f, 0.0f));
-            cube_model = glm::rotate(cube_model, time, glm::vec3(0.0f, 1.0f, 0.0f));
-            cube_instance.model_matrix = cube_model;
-            snapshot.instances.push_back(cube_instance);
+            for (size_t i = 0; i < helmet_nodes.size(); ++i) {
+                const auto& node = helmet_nodes[i];
+                RenderInstance instance{};
+                instance.entity_id = { static_cast<uint32_t>(i) };
+                instance.mesh_id = node.mesh_id;
+                
+                glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.0f));
+                model = glm::rotate(model, glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+                model = glm::rotate(model, time * 0.5f, glm::vec3(0.0f, 0.0f, 1.0f));
+                model = glm::scale(model, glm::vec3(2.0f));
+                instance.model_matrix = model;
+                
+                instance.material = node.material;
+                snapshot.instances.push_back(instance);
+            }
 
             if (auto draw_res = render.draw_frame(snapshot); !draw_res) {
                 std::cerr << "描画エラー: " << describe_error(draw_res.error()) << '\n';

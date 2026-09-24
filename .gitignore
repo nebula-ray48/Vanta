@@ -10,6 +10,13 @@
 # CMake & Clangd
 compile_commands.json
 .cache/
+.clangd/
+
+# Shaders (Generated SPIR-V)
+*.spv
+
+# Third-party / Downloaded Tools
+tools/filament/
 
 # Build Directories
 cmake-build-*/

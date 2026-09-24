@@ -56,7 +56,7 @@ uint32_t binding, uint32_t index, const vanta::vulkan::Texture& texture)
 } // namespace
 
 std::expected<void, EngineError> VulkanRenderer::initialize_textures() {
-
+    // 0: デフォルトテクスチャのロード
     auto image_data_opt = load_image("assets/textures/painted_plaster_wall_diff_4k.jpg");
     if (!image_data_opt) {
         return std::unexpected(EngineError{LegacyError{"テクスチャ画像のロードに失敗しました"}});
@@ -75,17 +75,71 @@ std::expected<void, EngineError> VulkanRenderer::initialize_textures() {
     }
 
     textures_.push_back(std::move(*texture_opt));
-    const uint32_t texture_index = static_cast<uint32_t>(textures_.size() - 1);
+    uint32_t default_texture_index = static_cast<uint32_t>(textures_.size() - 1);
 
     update_bindless_texture(
         context_.device,
         global_bindless_set_,
         0,
-        texture_index,
+        default_texture_index,
         textures_.back()
     );
 
-    std::cout << "Bindless texture registered at index: " << texture_index << "\n";
+    std::cout << "Default texture registered at index: " << default_texture_index << "\n";
+
+    // 1: BRDF LUT (2D UNORM) のロード
+    auto lut_image_opt = load_image("assets/textures/ibl/brdf_lut.png");
+    if (lut_image_opt) {
+        auto lut_texture_opt = vanta::vulkan::create_texture_from_image(
+            context_.device,
+            context_.physical_device,
+            frames_[current_frame_index_].graphics_command_pool,
+            context_.graphics_queue,
+            *lut_image_opt,
+            VK_FORMAT_R8G8B8A8_UNORM
+        );
+
+        if (lut_texture_opt) {
+            textures_.push_back(std::move(*lut_texture_opt));
+            brdf_lut_index_ = static_cast<uint32_t>(textures_.size() - 1);
+            update_bindless_texture(
+                context_.device,
+                global_bindless_set_,
+                0,
+                brdf_lut_index_,
+                textures_.back()
+            );
+            std::cout << "BRDF LUT registered at index: " << brdf_lut_index_ << "\n";
+        } else {
+            std::cerr << "Warning: Failed to upload BRDF LUT to GPU\n";
+        }
+    } else {
+        std::cerr << "Warning: Could not load assets/textures/ibl/brdf_lut.png\n";
+    }
+
+    // 2: IBL Specular キューブマップのロード
+    auto cubemap_opt = vanta::vulkan::create_cubemap_from_hdr_mips(
+        context_.device,
+        context_.physical_device,
+        frames_[current_frame_index_].graphics_command_pool,
+        context_.graphics_queue,
+        "assets/textures/ibl/studio_small_04_4k",
+        6
+    );
+
+    if (cubemap_opt) {
+        env_cubemap_ = std::move(*cubemap_opt);
+        BindlessDescriptorManager::update_cubemap(
+            context_.device,
+            global_bindless_set_,
+            env_cubemap_->get_view(),
+            env_cubemap_->get_sampler()
+        );
+        std::cout << "IBL Cubemap successfully loaded and bound to descriptor set\n";
+    } else {
+        std::cerr << "Warning: Failed to load IBL Cubemap from assets/textures/ibl/studio_small_04_4k\n";
+    }
+
     return {};
 }
 
@@ -173,20 +227,136 @@ std::expected<void, EngineError> VulkanRenderer::initialize_pipeline_resources()
         bindless_layout_   // Set 0
     };
 
-    auto pipeline = GraphicsPipeline::create(
-        context_.device,
-        swapchain_target_.format,
-        VK_FORMAT_D32_SFLOAT,
-        swapchain_target_.extent,
-        layouts,
-        binding_description,
-        attribute_descriptions);
+    // 1. Pipeline Layout の作成
+    VkPipelineLayoutCreateInfo const layout_info{
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = static_cast<uint32_t>(layouts.size()),
+        .pSetLayouts = layouts.data(),
+        .pushConstantRangeCount = 0,
+        .pPushConstantRanges = nullptr
+    };
 
-    if (!pipeline) {
-        return std::unexpected(pipeline.error());
+    if (vkCreatePipelineLayout(context_.device, &layout_info, nullptr, &pipeline_layout_) != VK_SUCCESS) {
+        return std::unexpected(EngineError{LegacyError{"Pipeline Layout生成失敗"}});
     }
 
-    pipeline_ = std::move(*pipeline);
+    // 2. シェーダーの読み込み
+    auto vert_spv = read_shader_file("assets/shaders/main_vert.spv");
+    if (!vert_spv) return std::unexpected(vert_spv.error());
+    auto frag_spv = read_shader_file("assets/shaders/main_frag.spv");
+    if (!frag_spv) return std::unexpected(frag_spv.error());
+
+    auto vert_module = create_shader_module(context_.device, *vert_spv);
+    if (!vert_module) return std::unexpected(vert_module.error());
+    auto frag_module = create_shader_module(context_.device, *frag_spv);
+    if (!frag_module) {
+        vkDestroyShaderModule(context_.device, *vert_module, nullptr);
+        return std::unexpected(frag_module.error());
+    }
+
+    auto skybox_vert_spv = read_shader_file("assets/shaders/skybox_vert.spv");
+    if (!skybox_vert_spv) return std::unexpected(skybox_vert_spv.error());
+    auto skybox_frag_spv = read_shader_file("assets/shaders/skybox_frag.spv");
+    if (!skybox_frag_spv) return std::unexpected(skybox_frag_spv.error());
+
+    auto skybox_vert_module = create_shader_module(context_.device, *skybox_vert_spv);
+    if (!skybox_vert_module) return std::unexpected(skybox_vert_module.error());
+    auto skybox_frag_module = create_shader_module(context_.device, *skybox_frag_spv);
+    if (!skybox_frag_module) return std::unexpected(skybox_frag_module.error());
+
+    std::vector<VkPipelineShaderStageCreateInfo> pbr_stages = {
+        { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, *vert_module, "main", nullptr },
+        { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT, *frag_module, "main", nullptr }
+    };
+    
+    std::vector<VkPipelineShaderStageCreateInfo> skybox_stages = {
+        { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, *skybox_vert_module, "main", nullptr },
+        { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT, *skybox_frag_module, "main", nullptr }
+    };
+    
+    // TODO: Toon用のシェーダーが用意できたら別モジュールを読み込む
+    // 今はとりあえず同じシェーダーを使う
+    std::vector<VkPipelineShaderStageCreateInfo> toon_stages = pbr_stages;
+    std::vector<VkPipelineShaderStageCreateInfo> outline_stages = pbr_stages; // アウトラインは頂点シェーダーが違うはずだが今は仮
+
+    // 3. ビューポート設定
+    VkViewport const viewport{
+        .x = 0.0f, .y = 0.0f,
+        .width = static_cast<float>(swapchain_target_.extent.width), .height = static_cast<float>(swapchain_target_.extent.height),
+        .minDepth = 0.0f, .maxDepth = 1.0f
+    };
+    VkRect2D const scissor{ .offset = {0, 0}, .extent = swapchain_target_.extent };
+    VkPipelineViewportStateCreateInfo const viewport_state{
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        .viewportCount = 1, .pViewports = &viewport,
+        .scissorCount = 1, .pScissors = &scissor
+    };
+
+    VkPipelineVertexInputStateCreateInfo const vertex_input_info{
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+        .vertexBindingDescriptionCount = 1,
+        .pVertexBindingDescriptions = &binding_description,
+        .vertexAttributeDescriptionCount = static_cast<uint32_t>(attribute_descriptions.size()),
+        .pVertexAttributeDescriptions = attribute_descriptions.data()
+    };
+
+    std::array<VkFormat, 1> color_formats = { swapchain_target_.format };
+
+    // 4. 各パイプラインの作成
+    PipelineBuilder builder;
+    builder.with_vertex_input(vertex_input_info)
+           .with_viewport_state(viewport_state)
+           .with_layout(pipeline_layout_);
+
+    // PBR パイプライン (背面カリング)
+    auto pbr_res = builder.with_shaders(pbr_stages)
+                          .with_cull_mode(VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_CLOCKWISE)
+                          .build(context_.device, color_formats, VK_FORMAT_D32_SFLOAT);
+    if (!pbr_res) {
+        vkDestroyShaderModule(context_.device, *frag_module, nullptr);
+        vkDestroyShaderModule(context_.device, *vert_module, nullptr);
+        return std::unexpected(pbr_res.error());
+    }
+    pbr_pipeline_.pipeline = *pbr_res;
+
+    // Toon パイプライン (背面カリング)
+    auto toon_res = builder.with_shaders(toon_stages)
+                           .with_cull_mode(VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_CLOCKWISE)
+                           .build(context_.device, color_formats, VK_FORMAT_D32_SFLOAT);
+    if (!toon_res) return std::unexpected(toon_res.error()); // TODO: エラーハンドリング整理
+    toon_pipeline_.pipeline = *toon_res;
+
+    // Toon Outline パイプライン (表面カリング)
+    auto outline_res = builder.with_shaders(outline_stages)
+                              .with_cull_mode(VK_CULL_MODE_FRONT_BIT, VK_FRONT_FACE_CLOCKWISE)
+                              // .with_depth_test(VK_TRUE, VK_FALSE, VK_COMPARE_OP_LESS_OR_EQUAL) // アウトライン特有の設定
+                              .build(context_.device, color_formats, VK_FORMAT_D32_SFLOAT);
+    if (!outline_res) return std::unexpected(outline_res.error());
+    toon_outline_pipeline_.pipeline = *outline_res;
+
+    // Skybox パイプライン
+    VkPipelineVertexInputStateCreateInfo empty_vertex_input{
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO
+    };
+    
+    PipelineBuilder skybox_builder;
+    skybox_builder.with_vertex_input(empty_vertex_input)
+                  .with_viewport_state(viewport_state)
+                  .with_layout(pipeline_layout_)
+                  .with_shaders(skybox_stages)
+                  .with_cull_mode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE)
+                  .with_depth_test(VK_TRUE, VK_FALSE, VK_COMPARE_OP_LESS_OR_EQUAL);
+
+    auto skybox_res = skybox_builder.build(context_.device, color_formats, VK_FORMAT_D32_SFLOAT);
+    if (!skybox_res) return std::unexpected(skybox_res.error());
+    skybox_pipeline_.pipeline = *skybox_res;
+
+    // 後始末
+    vkDestroyShaderModule(context_.device, *skybox_frag_module, nullptr);
+    vkDestroyShaderModule(context_.device, *skybox_vert_module, nullptr);
+    vkDestroyShaderModule(context_.device, *frag_module, nullptr);
+    vkDestroyShaderModule(context_.device, *vert_module, nullptr);
+
     return {};
 }
 
