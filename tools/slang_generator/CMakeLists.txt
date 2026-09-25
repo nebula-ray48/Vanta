@@ -17,6 +17,4 @@ else()
     target_compile_options(rey_slang_generator PRIVATE -Wall -Wextra)
 endif()
 
-find_package(slang CONFIG REQUIRED)
-
 target_link_libraries(rey_slang_generator PRIVATE slang::slang)

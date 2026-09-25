@@ -67,3 +67,7 @@ Thumbs.db
 # Agent & Local AI Config
 .agents/
 
+# ImGui
+imgui.ini
+
+

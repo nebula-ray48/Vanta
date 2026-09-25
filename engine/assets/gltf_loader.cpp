@@ -30,13 +30,12 @@ constexpr const char* get_mime_type_string(fastgltf::MimeType mime) {
     }
 
     fastgltf::Parser parser;
-    auto data = fastgltf::GltfDataBuffer::FromPath(file_path);
-
-    if (data.error() != fastgltf::Error::None) {
+    fastgltf::GltfDataBuffer data;
+    if (!data.loadFromFile(file_path)) {
         return std::unexpected(GltfLoadError::BufferLoadFailed);
     }
 
-    auto asset_res = parser.loadGltf(data.get(), file_path.parent_path(),
+    auto asset_res = parser.loadGltf(&data, file_path.parent_path(),
         fastgltf::Options::LoadExternalBuffers | fastgltf::Options::LoadExternalImages);
 
     if (asset_res.error() != fastgltf::Error::None) {
@@ -173,7 +172,7 @@ constexpr const char* get_mime_type_string(fastgltf::MimeType mime) {
 
             auto* position_it = primitive.findAttribute("POSITION");
             if (position_it != primitive.attributes.end()) {
-                auto& accessor = asset.accessors[position_it->accessorIndex];
+                auto& accessor = asset.accessors[position_it->second];
                 scene.vertices.resize(initial_vertex_count + accessor.count);
                 fastgltf::iterateAccessorWithIndex<glm::vec3>(asset, accessor, [&](glm::vec3 pos, std::size_t idx) {
                     scene.vertices[initial_vertex_count + idx].position = pos;
@@ -182,7 +181,7 @@ constexpr const char* get_mime_type_string(fastgltf::MimeType mime) {
 
             auto* normal_it = primitive.findAttribute("NORMAL");
             if (normal_it != primitive.attributes.end()) {
-                auto& accessor = asset.accessors[normal_it->accessorIndex];
+                auto& accessor = asset.accessors[normal_it->second];
                 fastgltf::iterateAccessorWithIndex<glm::vec3>(asset, accessor, [&](glm::vec3 normal, std::size_t idx) {
                     scene.vertices[initial_vertex_count + idx].normal = normal;
                 });
@@ -190,7 +189,7 @@ constexpr const char* get_mime_type_string(fastgltf::MimeType mime) {
 
             auto* uv_it = primitive.findAttribute("TEXCOORD_0");
             if (uv_it != primitive.attributes.end()) {
-                auto& accessor = asset.accessors[uv_it->accessorIndex];
+                auto& accessor = asset.accessors[uv_it->second];
                 fastgltf::iterateAccessorWithIndex<glm::vec2>(asset, accessor, [&](glm::vec2 uv, std::size_t idx) {
                     scene.vertices[initial_vertex_count + idx].uv = uv;
                 });
@@ -216,12 +215,12 @@ constexpr const char* get_mime_type_string(fastgltf::MimeType mime) {
         n.name = node.name.c_str();
         n.mesh_index = node.meshIndex.has_value() ? static_cast<int32_t>(node.meshIndex.value()) : -1;
 
-        if (auto* m = std::get_if<fastgltf::math::mat<float, 4, 4>>(&node.transform)) {
+        if (auto* m = std::get_if<fastgltf::Node::TransformMatrix>(&node.transform)) {
             n.local_transform = glm::mat4(
-                (*m)[0][0], (*m)[0][1], (*m)[0][2], (*m)[0][3],
-                (*m)[1][0], (*m)[1][1], (*m)[1][2], (*m)[1][3],
-                (*m)[2][0], (*m)[2][1], (*m)[2][2], (*m)[2][3],
-                (*m)[3][0], (*m)[3][1], (*m)[3][2], (*m)[3][3]
+                (*m)[0], (*m)[1], (*m)[2], (*m)[3],
+                (*m)[4], (*m)[5], (*m)[6], (*m)[7],
+                (*m)[8], (*m)[9], (*m)[10], (*m)[11],
+                (*m)[12], (*m)[13], (*m)[14], (*m)[15]
             );
         } else if (auto* trs = std::get_if<fastgltf::TRS>(&node.transform)) {
             glm::mat4 t = glm::translate(glm::mat4(1.0f), glm::vec3(trs->translation[0], trs->translation[1], trs->translation[2]));

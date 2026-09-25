@@ -6,18 +6,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-find_package(Vulkan REQUIRED)
-find_package(glfw3 CONFIG REQUIRED)
-find_package(glm CONFIG REQUIRED)
-find_package(flatbuffers CONFIG REQUIRED)
-find_package(fastgltf CONFIG REQUIRED)
-find_package(imgui CONFIG REQUIRED)
-
+include(cmake/Dependencies.cmake)
 
 add_subdirectory(tools/slang_generator)
 add_subdirectory(schemas)
-
-find_program(SLANGC_EXECUTABLE slangc REQUIRED)
 
 set(SHADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders")
 set(GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/schemas/generated")

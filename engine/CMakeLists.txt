@@ -1,9 +1,4 @@
 find_package(Vulkan REQUIRED)
-find_package(glfw3 CONFIG REQUIRED)
-find_package(glm CONFIG REQUIRED)
-find_package(flatbuffers CONFIG REQUIRED)
-find_package(fastgltf CONFIG REQUIRED)
-find_package(imgui CONFIG REQUIRED)
 
 add_library(vanta_engine STATIC
         # Render
@@ -77,7 +72,6 @@ add_library(vanta_engine STATIC
         render/include/ext/vk_mem_alloc.h
         render/include/ext/vma_implementation.cpp
         render/include/ext/glfw3.h
-        render/include/ext/glfw_includeI_vulkan.cpp
         render/include/ext/stb_image.h
         render/include/ext/imgui_impl_glfw.h
         render/include/ext/imgui_impl_glfw.cpp

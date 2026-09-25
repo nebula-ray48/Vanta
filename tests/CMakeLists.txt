@@ -6,8 +6,6 @@ add_executable(vanta_frame_graph_tests
         frame_graph_tests.cpp
 )
 
-find_package(glfw3 REQUIRED)
-find_package(GTest CONFIG REQUIRED)
 
 target_include_directories(vanta_engine_tests PRIVATE
         ${CMAKE_SOURCE_DIR}/include
