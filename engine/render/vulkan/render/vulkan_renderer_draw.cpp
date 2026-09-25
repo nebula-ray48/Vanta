@@ -93,17 +93,14 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
     vmaMapMemory(context_.allocator, indirect_buffer_.allocation, (void**)&indirect_cmds);
 
     uint32_t instance_idx = 0;
+    
+    uint32_t pbr_start_idx = instance_idx;
+    uint32_t pbr_count = 0;
+    
+    // 1. PBR Instances
     for (const auto& instance : snapshot.instances) {
-        object_data[instance_idx].model_matrix = instance.model_matrix;
-        
         if (instance.material.type == MaterialType::PBR) {
-            // PBRペイロードとして書き込む
-            // data[0..3] = base_color
-            // data[4] = metallic
-            // data[5] = roughness
-            // data[6] = albedo_texture_id
-            // data[7] = normal_texture_id
-            // data[8] = mrm_texture_id
+            object_data[instance_idx].model_matrix = instance.model_matrix;
             std::memcpy(&object_data[instance_idx].data[0], &instance.material.pbr.base_color, sizeof(glm::vec4));
             std::memcpy(&object_data[instance_idx].data[4], &instance.material.pbr.metallic, sizeof(float));
             std::memcpy(&object_data[instance_idx].data[5], &instance.material.pbr.roughness, sizeof(float));
@@ -114,15 +111,27 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
             object_data[instance_idx].data[10] = instance.material.pbr.mrm_texture_id;
             object_data[instance_idx].data[11] = instance.material.pbr.emissive_texture_id;
             object_data[instance_idx].data[12] = instance.material.pbr.occlusion_texture_id;
-        } else if (instance.material.type == MaterialType::Toon) {
-            // Toonペイロード
-            // data[0..3] = base_color
-            // data[4..7] = shade_color
-            // data[8] = outline_width
-            // data[9] = threshold
-            // data[10] = feather
-            // data[11] = albedo_texture_id
-            // data[12] = shade_texture_id
+
+            if (instance.mesh_id.value < meshes_.size()) {
+                const auto& mesh = meshes_[instance.mesh_id.value];
+                indirect_cmds[instance_idx].indexCount = mesh.index_count;
+                indirect_cmds[instance_idx].instanceCount = 1;
+                indirect_cmds[instance_idx].firstIndex = mesh.first_index;
+                indirect_cmds[instance_idx].vertexOffset = mesh.vertex_offset;
+                indirect_cmds[instance_idx].firstInstance = instance_idx;
+            }
+            instance_idx++;
+            pbr_count++;
+        }
+    }
+
+    uint32_t toon_start_idx = instance_idx;
+    uint32_t toon_count = 0;
+
+    // 2. Toon Instances
+    for (const auto& instance : snapshot.instances) {
+        if (instance.material.type == MaterialType::Toon) {
+            object_data[instance_idx].model_matrix = instance.model_matrix;
             std::memcpy(&object_data[instance_idx].data[0], &instance.material.toon.base_color, sizeof(glm::vec4));
             std::memcpy(&object_data[instance_idx].data[4], &instance.material.toon.shade_color, sizeof(glm::vec4));
             std::memcpy(&object_data[instance_idx].data[8], &instance.material.toon.outline_width, sizeof(float));
@@ -130,17 +139,18 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
             std::memcpy(&object_data[instance_idx].data[10], &instance.material.toon.feather, sizeof(float));
             object_data[instance_idx].data[11] = instance.material.toon.albedo_texture_id;
             object_data[instance_idx].data[12] = instance.material.toon.shade_texture_id;
-        }
 
-        if (instance.mesh_id.value < meshes_.size()) {
-            const auto& mesh = meshes_[instance.mesh_id.value];
-            indirect_cmds[instance_idx].indexCount = mesh.index_count;
-            indirect_cmds[instance_idx].instanceCount = 1;
-            indirect_cmds[instance_idx].firstIndex = mesh.first_index;
-            indirect_cmds[instance_idx].vertexOffset = mesh.vertex_offset;
-            indirect_cmds[instance_idx].firstInstance = instance_idx;
+            if (instance.mesh_id.value < meshes_.size()) {
+                const auto& mesh = meshes_[instance.mesh_id.value];
+                indirect_cmds[instance_idx].indexCount = mesh.index_count;
+                indirect_cmds[instance_idx].instanceCount = 1;
+                indirect_cmds[instance_idx].firstIndex = mesh.first_index;
+                indirect_cmds[instance_idx].vertexOffset = mesh.vertex_offset;
+                indirect_cmds[instance_idx].firstInstance = instance_idx;
+            }
+            instance_idx++;
+            toon_count++;
         }
-        instance_idx++;
     }
 
     vmaUnmapMemory(context_.allocator, object_buffer_.allocation);
@@ -416,7 +426,8 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
         .read_image(ssao_image, fg::UsageType::ShaderRead)
         .write_image(hdr_color, fg::UsageType::ColorAttachment)
         .write_image(depth_image, fg::UsageType::DepthAttachment)
-        .execute([this, &snapshot, hdr_color, depth_image, ssao_image, render_extent](const fg::PassContext& ctx) {
+        .execute([this, &snapshot, hdr_color, depth_image, ssao_image, render_extent, 
+                  pbr_start_idx, pbr_count, toon_start_idx, toon_count](const fg::PassContext& ctx) {
             VkCommandBuffer cmd = ctx.command_buffer();
 
             uint32_t temp_ssao_index = 500; // 仮のインデックス (Bindlessの空き枠)
@@ -497,17 +508,24 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
             vkCmdBindVertexBuffers(cmd, 0, 1, vertex_buffers, offsets);
             vkCmdBindIndexBuffer(cmd, global_index_buffer_.buffer, 0, VK_INDEX_TYPE_UINT32);
 
-            if (!snapshot.instances.empty()) {
-                // TODO: 実際は PBR, Toon, ToonOutline ごとにインスタンスをソートするか
-                // IndirectCommand のオフセットを計算して、複数回 vkCmdDrawIndexedIndirect を呼び出す必要がある。
-                // 現在は全て PBR として一括描画する
-                
+            if (pbr_count > 0) {
                 vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pbr_pipeline_.pipeline);
                 vkCmdDrawIndexedIndirect(
                     cmd, 
                     indirect_buffer_.buffer, 
-                    0, 
-                    static_cast<uint32_t>(snapshot.instances.size()),
+                    pbr_start_idx * sizeof(VkDrawIndexedIndirectCommand), 
+                    pbr_count,
+                    sizeof(VkDrawIndexedIndirectCommand)
+                );
+            }
+
+            if (toon_count > 0 && toon_pipeline_.pipeline != VK_NULL_HANDLE) {
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, toon_pipeline_.pipeline);
+                vkCmdDrawIndexedIndirect(
+                    cmd, 
+                    indirect_buffer_.buffer, 
+                    toon_start_idx * sizeof(VkDrawIndexedIndirectCommand), 
+                    toon_count,
                     sizeof(VkDrawIndexedIndirectCommand)
                 );
             }

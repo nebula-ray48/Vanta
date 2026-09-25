@@ -503,9 +503,21 @@ std::expected<void, EngineError> VulkanRenderer::initialize_pipeline_resources()
         { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT, *depth_normal_frag_module, "main", nullptr }
     };
 
-    // TODO: Toon用のシェーダーが用意できたら別モジュールを読み込む
-    // 今はとりあえず同じシェーダーを使う
-    std::vector<VkPipelineShaderStageCreateInfo> toon_stages = pbr_stages;
+    auto toon_vert_spv = read_shader_file("assets/shaders/toon_vert.spv");
+    if (!toon_vert_spv) return std::unexpected(toon_vert_spv.error());
+    auto toon_frag_spv = read_shader_file("assets/shaders/toon_frag.spv");
+    if (!toon_frag_spv) return std::unexpected(toon_frag_spv.error());
+
+    auto toon_vert_module = create_shader_module(context_.device, *toon_vert_spv);
+    if (!toon_vert_module) return std::unexpected(toon_vert_module.error());
+    auto toon_frag_module = create_shader_module(context_.device, *toon_frag_spv);
+    if (!toon_frag_module) return std::unexpected(toon_frag_module.error());
+
+    std::vector<VkPipelineShaderStageCreateInfo> toon_stages = {
+        { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, *toon_vert_module, "main", nullptr },
+        { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT, *toon_frag_module, "main", nullptr }
+    };
+
     std::vector<VkPipelineShaderStageCreateInfo> outline_stages = pbr_stages; // アウトラインは頂点シェーダーが違うはずだが今は仮
 
     // 3. ビューポート設定

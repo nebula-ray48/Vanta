@@ -163,6 +163,13 @@ int main() {
             }
             ImGui::Separator();
             
+            static int material_type_selection = 1; // 0 = PBR, 1 = Toon (テスト用に1にしておく)
+            
+            if (ImGui::CollapsingHeader("Material", ImGuiTreeNodeFlags_DefaultOpen)) {
+                ImGui::RadioButton("PBR", &material_type_selection, 0); ImGui::SameLine();
+                ImGui::RadioButton("Toon", &material_type_selection, 1);
+            }
+            
             if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
                 ImGui::Checkbox("Auto Rotate Model", &auto_rotate_model);
                 if (!auto_rotate_model) {
@@ -270,6 +277,19 @@ int main() {
                 instance.model_matrix = model * node.global_transform;
                 
                 instance.material = node.material;
+                if (material_type_selection == 0) {
+                    instance.material.type = MaterialType::PBR;
+                } else {
+                    instance.material.type = MaterialType::Toon;
+                    // デフォルトのToonパラメータ
+                    instance.material.toon.base_color = glm::vec4(1.0f);
+                    if (instance.material.pbr.albedo_texture_id != 0) {
+                        instance.material.toon.albedo_texture_id = instance.material.pbr.albedo_texture_id;
+                    }
+                    instance.material.toon.shade_color = glm::vec4(0.4f, 0.4f, 0.6f, 1.0f); // 少し青みがかった影
+                    instance.material.toon.threshold = 0.5f;
+                    instance.material.toon.feather = 0.02f; // トゥーン特有のくっきりした境界
+                }
                 snapshot.instances.push_back(instance);
             }
 
@@ -291,7 +311,7 @@ int main() {
             }
         }
 
-        std::cout << "メインループを終了します。リソースを安全に破棄します...\n";
+        std::cout << "メインループを終了します。リソースを破棄します...\n";
     } catch (const std::exception& e) {
         std::cerr << "致命的なエラー: " << e.what() << '\n';
     }
