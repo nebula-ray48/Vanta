@@ -50,8 +50,9 @@ float4 skyboxFragmentMain(SkyboxVertexOutput input) : SV_Target {
     float3 envColor = envCubemap.SampleLevel(dir, 0.0).rgb;
 
     // HDR Tone mapping (Reinhard) and Gamma correction
-    envColor = envColor / (envColor + float3(1.0));
-    envColor = pow(envColor, float3(1.0 / 2.2));
+    // RenderGraph で HDR 出力とし、ポストプロセスでまとめてかけるためコメントアウト
+    // envColor = envColor / (envColor + float3(1.0));
+    // envColor = pow(envColor, float3(1.0 / 2.2));
 
     return float4(envColor, 1.0);
 }

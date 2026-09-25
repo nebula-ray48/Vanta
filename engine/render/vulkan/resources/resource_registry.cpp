@@ -306,4 +306,27 @@ void ResourceRegistry::clear_pool(const VulkanContext& ctx) {
     image_cache_.clear();
 }
 
+void ResourceRegistry::clear_all(const VulkanContext& ctx) {
+    clear_pool(ctx);
+    for (size_t i = 0; i < vk_images_.size(); ++i) {
+        if (image_allocations_[i] != VK_NULL_HANDLE) {
+            if (vk_image_views_[i] != VK_NULL_HANDLE) {
+                vkDestroyImageView(ctx.device, vk_image_views_[i], nullptr);
+            }
+            vmaDestroyImage(ctx.allocator, vk_images_[i], image_allocations_[i]);
+        }
+        vk_images_[i] = VK_NULL_HANDLE;
+        vk_image_views_[i] = VK_NULL_HANDLE;
+        image_allocations_[i] = VK_NULL_HANDLE;
+    }
+
+    for (size_t i = 0; i < vk_buffers_.size(); ++i) {
+        if (buffer_allocations_[i] != VK_NULL_HANDLE) {
+            vmaDestroyBuffer(ctx.allocator, vk_buffers_[i], buffer_allocations_[i]);
+        }
+        vk_buffers_[i] = VK_NULL_HANDLE;
+        buffer_allocations_[i] = VK_NULL_HANDLE;
+    }
+}
+
 } // namespace vanta::render

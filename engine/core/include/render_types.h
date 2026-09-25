@@ -107,7 +107,9 @@ struct RenderInstance {
 struct RenderSnapshot {
     uint64_t frame_number;
     std::vector<RenderInstance> instances;
+    glm::mat4 view_proj_matrix;
     glm::mat4 view_matrix;
+    glm::mat4 proj_matrix;
     glm::vec3 camera_pos{0.0f, 0.0f, 0.0f};
     glm::vec3 sun_direction{0.2f, 0.5f, 1.0f};
 };
@@ -132,4 +134,26 @@ struct PushConstants {
     PushConstants(const glm::mat4& model, const glm::mat4& view, const glm::mat4& proj) {
         mvp = proj * view * model;
     }
+};
+
+struct PostProcessSettings {
+    // General
+    float render_scale = 1.0f;
+    bool enable_ssao = true;
+    bool enable_bloom = true;
+
+    // Bloom
+    float bloom_threshold = 3.0f;
+    float bloom_soft_knee = 0.5f;
+    float streak_length = 4.0f;
+    float bloom_tint[3] = {0.35f, 0.75f, 1.35f};
+    float bloom_intensity = 0.35f;
+
+    // Tonemap & Cinematic Lens
+    float ca_strength = 0.0012f;
+    float saturation = 1.05f;
+    float contrast = 1.04f;
+    float vignette_radius = 1.15f;
+    float vignette_smoothness = 0.65f;
+    float grain_amount = 0.008f;
 };

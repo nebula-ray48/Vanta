@@ -12,6 +12,9 @@
 #include "vulkan/frame_graph/pass_context.h"
 #include "vulkan/resources/resource_registry.h"
 #include "vulkan_renderer.h"
+#include "imgui.h"
+#include "ext/imgui_impl_glfw.h"
+#include "ext/imgui_impl_vulkan.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -24,8 +27,8 @@ GlobalUbo VulkanRenderer::build_global_ubo(const RenderSnapshot& snapshot) const
     glm::mat4 light_view = glm::lookAt(sun_dir * 20.0f, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 
     GlobalUbo ubo{
-        .view_proj = snapshot.view_matrix,
-        .inv_view_proj = glm::inverse(snapshot.view_matrix),
+        .view_proj = snapshot.view_proj_matrix,
+        .inv_view_proj = glm::inverse(snapshot.view_proj_matrix),
         .light_view_proj = light_proj * light_view,
         .camera_pos = snapshot.camera_pos,
         .padding = 0.0f,
@@ -46,8 +49,17 @@ GlobalUbo VulkanRenderer::build_global_ubo(const RenderSnapshot& snapshot) const
         .brdf_lut_index = brdf_lut_index_,
         .max_reflection_lod = 5.0f,
         .shadow_map_index = shadow_map_index_,
-        ._pad = {0.0f}
+        .ssao_map_index = 500, // This will be set right before MainColorPass
+        .view_matrix = snapshot.view_matrix,
+        .proj_matrix = snapshot.proj_matrix,
+        .inv_proj_matrix = glm::inverse(snapshot.proj_matrix),
+        .screen_size = glm::vec2(swapchain_target_.extent.width, swapchain_target_.extent.height),
+        .ssao_radius = 0.5f,
+        .ssao_bias = 0.025f
     };
+    for (int i = 0; i < 64; ++i) {
+        ubo.ssao_samples[i] = ssao_samples_[i];
+    }
     return ubo;
 }
 
@@ -146,12 +158,35 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
         },
         fg::UsageType::Undefined);
 
+    VkExtent2D render_extent = {
+        static_cast<uint32_t>(swapchain_target_.extent.width * post_process_settings_.render_scale),
+        static_cast<uint32_t>(swapchain_target_.extent.height * post_process_settings_.render_scale)
+    };
+    render_extent.width = std::max(1u, render_extent.width);
+    render_extent.height = std::max(1u, render_extent.height);
+
     const fg::ImageHandle depth_image = graph_builder.create_image(
         fg::ImageDescription{
-            .width = swapchain_target_.extent.width,
-            .height = swapchain_target_.extent.height,
+            .width = render_extent.width,
+            .height = render_extent.height,
             .format = VK_FORMAT_D32_SFLOAT,
-            .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+            .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        });
+
+    const fg::ImageHandle normal_image = graph_builder.create_image(
+        fg::ImageDescription{
+            .width = render_extent.width,
+            .height = render_extent.height,
+            .format = VK_FORMAT_R16G16B16A16_SFLOAT,
+            .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        });
+
+    const fg::ImageHandle ssao_image = graph_builder.create_image(
+        fg::ImageDescription{
+            .width = render_extent.width,
+            .height = render_extent.height,
+            .format = VK_FORMAT_R8_UNORM,
+            .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
         });
 
     graph_builder.import_image(
@@ -227,30 +262,194 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
             vkCmdEndRendering(cmd);
         });
 
-    graph_builder.add_pass("MainColorPass")
-        .write_image(swapchain_image, fg::UsageType::ColorAttachment)
+    graph_builder.add_pass("DepthNormalPass")
+        .write_image(normal_image, fg::UsageType::ColorAttachment)
         .write_image(depth_image, fg::UsageType::DepthAttachment)
-        .execute([this, &snapshot, swapchain_image, depth_image](const fg::PassContext& ctx) {
+        .execute([this, &snapshot, normal_image, depth_image, render_extent](const fg::PassContext& ctx) {
             VkCommandBuffer cmd = ctx.command_buffer();
-            VkRenderingAttachmentInfo color_attachment{
+            
+            VkRenderingAttachmentInfo color_attach{
                 .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-                .imageView = ctx.get_image_view(swapchain_image),
+                .imageView = ctx.get_image_view(normal_image),
                 .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                 .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
                 .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-                .clearValue = {{{0.1f, 0.1f, 0.11f, 1.0f}}},
+                .clearValue = {{{0.0f, 0.0f, 0.0f, 0.0f}}},
+            };
+
+            VkRenderingAttachmentInfo depth_attach{
+                .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                .imageView = ctx.get_image_view(depth_image),
+                .imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                .clearValue = {{{1.0f, 0}}},
+            };
+            
+            const VkRenderingInfo render_info{
+                .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+                .renderArea = {.offset = {0, 0}, .extent = render_extent},
+                .layerCount = 1,
+                .colorAttachmentCount = 1,
+                .pColorAttachments = &color_attach,
+                .pDepthAttachment = &depth_attach,
+            };
+
+            vkCmdBeginRendering(cmd, &render_info);
+
+            const VkViewport viewport{
+                .x = 0.0f, .y = 0.0f,
+                .width = static_cast<float>(render_extent.width), .height = static_cast<float>(render_extent.height),
+                .minDepth = 0.0f, .maxDepth = 1.0f,
+            };
+            vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+            const VkRect2D scissor{ .offset = {0, 0}, .extent = render_extent };
+            vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+            std::array<VkDescriptorSet, 1> bound_sets = { global_bindless_set_ };
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout_, 0, 1, bound_sets.data(), 0, nullptr);
+
+            VkBuffer vertex_buffers[] = {global_vertex_buffer_.buffer};
+            VkDeviceSize offsets[] = {0};
+            vkCmdBindVertexBuffers(cmd, 0, 1, vertex_buffers, offsets);
+            vkCmdBindIndexBuffer(cmd, global_index_buffer_.buffer, 0, VK_INDEX_TYPE_UINT32);
+
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, depth_normal_pipeline_.pipeline);
+
+            if (!snapshot.instances.empty()) {
+                vkCmdDrawIndexedIndirect(cmd, indirect_buffer_.buffer, 0, static_cast<uint32_t>(snapshot.instances.size()), sizeof(VkDrawIndexedIndirectCommand));
+            }
+            vkCmdEndRendering(cmd);
+        });
+
+    graph_builder.add_pass("SSAOPass")
+        .read_image(depth_image, fg::UsageType::ShaderRead)
+        .read_image(normal_image, fg::UsageType::ShaderRead)
+        .write_image(ssao_image, fg::UsageType::ShaderWrite)
+        .execute([this, depth_image, normal_image, ssao_image, render_extent](const fg::PassContext& ctx) {
+            VkCommandBuffer cmd = ctx.command_buffer();
+            if (!post_process_settings_.enable_ssao) {
+                VkClearColorValue clear_color = {{1.0f, 1.0f, 1.0f, 1.0f}};
+                VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+                vkCmdClearColorImage(cmd, ctx.get_image(ssao_image), VK_IMAGE_LAYOUT_GENERAL, &clear_color, 1, &range);
+                return;
+            }
+            VkDescriptorSet ssao_set = ssao_sets_[current_frame_index_];
+
+            VkDescriptorImageInfo depth_info{
+                .sampler = VK_NULL_HANDLE,
+                .imageView = ctx.get_image_view(depth_image),
+                .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            };
+            VkDescriptorImageInfo normal_info{
+                .sampler = VK_NULL_HANDLE,
+                .imageView = ctx.get_image_view(normal_image),
+                .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            };
+            VkDescriptorImageInfo noise_info{
+                .sampler = VK_NULL_HANDLE,
+                .imageView = ssao_noise_tex_->get_view(),
+                .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            };
+            VkDescriptorImageInfo out_info{
+                .sampler = VK_NULL_HANDLE,
+                .imageView = ctx.get_image_view(ssao_image),
+                .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
+            };
+
+            std::array<VkWriteDescriptorSet, 4> writes = {
+                VkWriteDescriptorSet{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, ssao_set, 0, 0, 1, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, &depth_info, nullptr, nullptr},
+                VkWriteDescriptorSet{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, ssao_set, 1, 0, 1, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, &normal_info, nullptr, nullptr},
+                VkWriteDescriptorSet{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, ssao_set, 2, 0, 1, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, &noise_info, nullptr, nullptr},
+                VkWriteDescriptorSet{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, ssao_set, 3, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, &out_info, nullptr, nullptr}
+            };
+            vkUpdateDescriptorSets(context_.device, writes.size(), writes.data(), 0, nullptr);
+
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, ssao_pipeline_.pipeline);
+            std::array<VkDescriptorSet, 2> sets = { global_bindless_set_, ssao_set };
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_layout_, 0, 2, sets.data(), 0, nullptr);
+
+            uint32_t group_x = (render_extent.width + 15) / 16;
+            uint32_t group_y = (render_extent.height + 15) / 16;
+            vkCmdDispatch(cmd, group_x, group_y, 1);
+        });
+
+    const fg::ImageHandle hdr_color = graph_builder.create_image(
+        fg::ImageDescription{
+            .width = render_extent.width,
+            .height = render_extent.height,
+            .format = VK_FORMAT_R16G16B16A16_SFLOAT,
+            .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
+        }
+    );
+
+    fg::ImageHandle bloom_extracted;
+    fg::ImageHandle bloom_blurred;
+
+    if (post_process_settings_.enable_bloom) {
+        bloom_extracted = graph_builder.create_image(
+            fg::ImageDescription{
+                .width = render_extent.width,
+                .height = render_extent.height,
+                .format = VK_FORMAT_R16G16B16A16_SFLOAT,
+                .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
+            }
+        );
+
+        bloom_blurred = graph_builder.create_image(
+            fg::ImageDescription{
+                .width = render_extent.width,
+                .height = render_extent.height,
+                .format = VK_FORMAT_R16G16B16A16_SFLOAT,
+                .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
+            }
+        );
+    }
+
+    graph_builder.add_pass("MainColorPass")
+        .read_image(ssao_image, fg::UsageType::ShaderRead)
+        .write_image(hdr_color, fg::UsageType::ColorAttachment)
+        .write_image(depth_image, fg::UsageType::DepthAttachment)
+        .execute([this, &snapshot, hdr_color, depth_image, ssao_image, render_extent](const fg::PassContext& ctx) {
+            VkCommandBuffer cmd = ctx.command_buffer();
+
+            uint32_t temp_ssao_index = 500; // 仮のインデックス (Bindlessの空き枠)
+            VkDescriptorImageInfo ssao_info{
+                .sampler = env_cubemap_->get_sampler(),
+                .imageView = ctx.get_image_view(ssao_image),
+                .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            };
+            VkWriteDescriptorSet write_ssao{
+                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .dstSet = global_bindless_set_,
+                .dstBinding = 1, // textures
+                .dstArrayElement = temp_ssao_index,
+                .descriptorCount = 1,
+                .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                .pImageInfo = &ssao_info,
+            };
+            vkUpdateDescriptorSets(context_.device, 1, &write_ssao, 0, nullptr);
+
+            VkRenderingAttachmentInfo color_attachment{
+                .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                .imageView = ctx.get_image_view(hdr_color),
+                .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                .clearValue = {{{0.1f, 0.1f, 0.11f, 1.0f}}}, // 修正: 元の背景色に戻す
             };
             VkRenderingAttachmentInfo depth_attachment{
                 .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
                 .imageView = ctx.get_image_view(depth_image),
                 .imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-                .storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+                .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR, // 修正: Z-fightingを防ぐためクリアする
+                .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
                 .clearValue = {{{1.0f, 0}},},
             };
             const VkRenderingInfo rendering_info{
                 .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-                .renderArea = {.offset = {0, 0}, .extent = swapchain_target_.extent},
+                .renderArea = {.offset = {0, 0}, .extent = render_extent},
                 .layerCount = 1,
                 .colorAttachmentCount = 1,
                 .pColorAttachments = &color_attachment,
@@ -262,8 +461,8 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
             const VkViewport viewport{
                 .x = 0.0f,
                 .y = 0.0f,
-                .width = static_cast<float>(swapchain_target_.extent.width),
-                .height = static_cast<float>(swapchain_target_.extent.height),
+                .width = static_cast<float>(render_extent.width),
+                .height = static_cast<float>(render_extent.height),
                 .minDepth = 0.0f,
                 .maxDepth = 1.0f,
             };
@@ -271,7 +470,7 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
 
             const VkRect2D scissor{
                 .offset = {0, 0},
-                .extent = swapchain_target_.extent,
+                .extent = render_extent,
             };
             vkCmdSetScissor(cmd, 0, 1, &scissor);
 
@@ -317,11 +516,327 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
             vkCmdEndRendering(cmd);
         });
 
+    if (post_process_settings_.enable_bloom) {
+        graph_builder.add_pass("BloomExtractPass")
+            .read_image(hdr_color, fg::UsageType::ShaderRead)
+            .write_image(bloom_extracted, fg::UsageType::ColorAttachment)
+            .execute([this, hdr_color, bloom_extracted, render_extent](const fg::PassContext& ctx) {
+            VkCommandBuffer cmd = ctx.command_buffer();
+
+            uint32_t hdr_tex_index = 501;
+            VkDescriptorImageInfo hdr_info{
+                .sampler = env_cubemap_->get_sampler(),
+                .imageView = ctx.get_image_view(hdr_color),
+                .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            };
+            VkWriteDescriptorSet write_hdr{
+                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .dstSet = global_bindless_set_,
+                .dstBinding = 1,
+                .dstArrayElement = hdr_tex_index,
+                .descriptorCount = 1,
+                .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                .pImageInfo = &hdr_info,
+            };
+            vkUpdateDescriptorSets(context_.device, 1, &write_hdr, 0, nullptr);
+
+            VkRenderingAttachmentInfo color_attachment{
+                .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                .imageView = ctx.get_image_view(bloom_extracted),
+                .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                .clearValue = {{{0.0f, 0.0f, 0.0f, 1.0f}}},
+            };
+            const VkRenderingInfo rendering_info{
+                .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+                .renderArea = {.offset = {0, 0}, .extent = render_extent},
+                .layerCount = 1,
+                .colorAttachmentCount = 1,
+                .pColorAttachments = &color_attachment,
+            };
+
+            vkCmdBeginRendering(cmd, &rendering_info);
+
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, bloom_extract_pipeline_.pipeline);
+
+            const VkViewport viewport{
+                .x = 0.0f, .y = 0.0f,
+                .width = static_cast<float>(render_extent.width),
+                .height = static_cast<float>(render_extent.height),
+                .minDepth = 0.0f, .maxDepth = 1.0f,
+            };
+            vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+            const VkRect2D scissor{
+                .offset = {0, 0},
+                .extent = render_extent,
+            };
+            vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+            vkCmdBindDescriptorSets(
+                cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout_,
+                0, 1, &global_bindless_set_, 0, nullptr);
+
+            struct BloomExtractPushConstants {
+                uint32_t hdr_texture_id;
+                float threshold;
+                float soft_knee;
+            } pc = {
+                .hdr_texture_id = hdr_tex_index,
+                .threshold = post_process_settings_.bloom_threshold,
+                .soft_knee = post_process_settings_.bloom_soft_knee,
+            };
+            vkCmdPushConstants(
+                cmd, pipeline_layout_,
+                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
+                0, sizeof(pc), &pc);
+
+            vkCmdDraw(cmd, 3, 1, 0, 0);
+
+            vkCmdEndRendering(cmd);
+        });
+
+    graph_builder.add_pass("BloomBlurPass")
+        .read_image(bloom_extracted, fg::UsageType::ShaderRead)
+        .write_image(bloom_blurred, fg::UsageType::ColorAttachment)
+        .execute([this, bloom_extracted, bloom_blurred, render_extent](const fg::PassContext& ctx) {
+            VkCommandBuffer cmd = ctx.command_buffer();
+
+            uint32_t extract_tex_index = 502;
+            VkDescriptorImageInfo extract_info{
+                .sampler = env_cubemap_->get_sampler(),
+                .imageView = ctx.get_image_view(bloom_extracted),
+                .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            };
+            VkWriteDescriptorSet write_extract{
+                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .dstSet = global_bindless_set_,
+                .dstBinding = 1,
+                .dstArrayElement = extract_tex_index,
+                .descriptorCount = 1,
+                .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                .pImageInfo = &extract_info,
+            };
+            vkUpdateDescriptorSets(context_.device, 1, &write_extract, 0, nullptr);
+
+            VkRenderingAttachmentInfo color_attachment{
+                .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                .imageView = ctx.get_image_view(bloom_blurred),
+                .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                .clearValue = {{{0.0f, 0.0f, 0.0f, 1.0f}}},
+            };
+            const VkRenderingInfo rendering_info{
+                .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+                .renderArea = {.offset = {0, 0}, .extent = render_extent},
+                .layerCount = 1,
+                .colorAttachmentCount = 1,
+                .pColorAttachments = &color_attachment,
+            };
+
+            vkCmdBeginRendering(cmd, &rendering_info);
+
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, bloom_blur_pipeline_.pipeline);
+
+            const VkViewport viewport{
+                .x = 0.0f, .y = 0.0f,
+                .width = static_cast<float>(render_extent.width),
+                .height = static_cast<float>(render_extent.height),
+                .minDepth = 0.0f, .maxDepth = 1.0f,
+            };
+            vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+            const VkRect2D scissor{
+                .offset = {0, 0},
+                .extent = render_extent,
+            };
+            vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+            vkCmdBindDescriptorSets(
+                cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout_,
+                0, 1, &global_bindless_set_, 0, nullptr);
+
+            struct BloomBlurPushConstants {
+                uint32_t input_texture_id;
+                float streak_length;
+                float texel_size_x;
+                float texel_size_y;
+                float tint_r;
+                float tint_g;
+                float tint_b;
+                float intensity;
+            } pc = {
+                .input_texture_id = extract_tex_index,
+                .streak_length = post_process_settings_.streak_length,
+                .texel_size_x = 1.0f / static_cast<float>(render_extent.width),
+                .texel_size_y = 1.0f / static_cast<float>(render_extent.height),
+                .tint_r = post_process_settings_.bloom_tint[0],
+                .tint_g = post_process_settings_.bloom_tint[1],
+                .tint_b = post_process_settings_.bloom_tint[2],
+                .intensity = 1.0f,
+            };
+            vkCmdPushConstants(
+                cmd, pipeline_layout_,
+                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
+                0, sizeof(pc), &pc);
+
+            vkCmdDraw(cmd, 3, 1, 0, 0);
+
+            vkCmdEndRendering(cmd);
+        });
+    }
+
+    auto& tonemap_pass = graph_builder.add_pass("ToneMapPass")
+        .read_image(hdr_color, fg::UsageType::ShaderRead);
+        
+    if (post_process_settings_.enable_bloom) {
+        tonemap_pass.read_image(bloom_blurred, fg::UsageType::ShaderRead);
+    }
+    
+    tonemap_pass.write_image(swapchain_image, fg::UsageType::ColorAttachment)
+        .execute([this, hdr_color, bloom_blurred, swapchain_image](const fg::PassContext& ctx) {
+            VkCommandBuffer cmd = ctx.command_buffer();
+            
+            // HDRテクスチャを 501 番、ぼかし済みBloomテクスチャを 503 番に登録
+            uint32_t hdr_tex_index = 501;
+            VkDescriptorImageInfo hdr_info{
+                .sampler = env_cubemap_->get_sampler(),
+                .imageView = ctx.get_image_view(hdr_color),
+                .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            };
+            VkWriteDescriptorSet write_hdr{
+                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .dstSet = global_bindless_set_,
+                .dstBinding = 1,
+                .dstArrayElement = hdr_tex_index,
+                .descriptorCount = 1,
+                .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                .pImageInfo = &hdr_info,
+            };
+
+            uint32_t bloom_tex_index = 503;
+            VkDescriptorImageInfo bloom_info{
+                .sampler = env_cubemap_->get_sampler(),
+                .imageView = post_process_settings_.enable_bloom ? ctx.get_image_view(bloom_blurred) : ctx.get_image_view(hdr_color),
+                .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            };
+            VkWriteDescriptorSet write_bloom{
+                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .dstSet = global_bindless_set_,
+                .dstBinding = 1,
+                .dstArrayElement = bloom_tex_index,
+                .descriptorCount = 1,
+                .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                .pImageInfo = &bloom_info,
+            };
+
+            std::array<VkWriteDescriptorSet, 2> writes = { write_hdr, write_bloom };
+            vkUpdateDescriptorSets(context_.device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+
+            VkRenderingAttachmentInfo color_attachment{
+                .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                .imageView = ctx.get_image_view(swapchain_image),
+                .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                .clearValue = {{{0.0f, 0.0f, 0.0f, 1.0f}}}, // トーンマップ後は黒クリアでOK
+            };
+            const VkRenderingInfo rendering_info{
+                .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+                .renderArea = {.offset = {0, 0}, .extent = swapchain_target_.extent},
+                .layerCount = 1,
+                .colorAttachmentCount = 1,
+                .pColorAttachments = &color_attachment,
+            };
+
+            vkCmdBeginRendering(cmd, &rendering_info);
+
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, tonemap_pipeline_.pipeline);
+            
+            const VkViewport viewport{
+                .x = 0.0f, .y = 0.0f,
+                .width = static_cast<float>(swapchain_target_.extent.width),
+                .height = static_cast<float>(swapchain_target_.extent.height),
+                .minDepth = 0.0f, .maxDepth = 1.0f,
+            };
+            vkCmdSetViewport(cmd, 0, 1, &viewport);
+            
+            const VkRect2D scissor{
+                .offset = {0, 0},
+                .extent = swapchain_target_.extent,
+            };
+            vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+            vkCmdBindDescriptorSets(
+                cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout_,
+                0, 1, &global_bindless_set_, 0, nullptr);
+
+            // PushConstant でインデックスと動的ポストプロセス設定を渡す
+            struct TonemapPushConstants {
+                uint32_t hdr_texture_id;
+                uint32_t bloom_texture_id;
+                float bloom_intensity;
+                float ca_strength;
+                float saturation;
+                float contrast;
+                float vignette_radius;
+                float vignette_smoothness;
+                float grain_amount;
+                float _pad;
+            } pc = {
+                .hdr_texture_id = hdr_tex_index,
+                .bloom_texture_id = bloom_tex_index,
+                .bloom_intensity = post_process_settings_.enable_bloom ? post_process_settings_.bloom_intensity : 0.0f,
+                .ca_strength = post_process_settings_.ca_strength,
+                .saturation = post_process_settings_.saturation,
+                .contrast = post_process_settings_.contrast,
+                .vignette_radius = post_process_settings_.vignette_radius,
+                .vignette_smoothness = post_process_settings_.vignette_smoothness,
+                .grain_amount = post_process_settings_.grain_amount,
+                ._pad = 0.0f,
+            };
+            vkCmdPushConstants(
+                cmd, pipeline_layout_,
+                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
+                0, sizeof(pc), &pc);
+
+            // フルスクリーン三角形を描画
+            vkCmdDraw(cmd, 3, 1, 0, 0);
+
+            vkCmdEndRendering(cmd);
+        });
+
     // ---------------------------------------------------------
     // Phase 4: Render Graph のコンパイルと実行
     // - コンパイラが依存関係を解析し、バリアと実行順序を決定 (plan)
     // - GraphExecutor が plan に従って実際の Vulkan API を呼び出す
     // ---------------------------------------------------------
+
+    graph_builder.add_pass("ImGuiPass")
+        .write_image(swapchain_image, fg::UsageType::ColorAttachment)
+        .execute([this, swapchain_image](const fg::PassContext& ctx) {
+            VkCommandBuffer cmd = ctx.command_buffer();
+            VkRenderingAttachmentInfo color_attachment{
+                .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                .imageView = ctx.get_image_view(swapchain_image),
+                .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+                .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+            };
+            const VkRenderingInfo rendering_info{
+                .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+                .renderArea = {.offset = {0, 0}, .extent = swapchain_target_.extent},
+                .layerCount = 1,
+                .colorAttachmentCount = 1,
+                .pColorAttachments = &color_attachment,
+            };
+
+            vkCmdBeginRendering(cmd, &rendering_info);
+            end_imgui_frame(cmd);
+            vkCmdEndRendering(cmd);
+        });
 
     graph_builder.add_pass("PresentPass")
         .read_image(swapchain_image, fg::UsageType::Present);
@@ -423,6 +938,17 @@ std::expected<void, EngineError> VulkanRenderer::end_frame(const ActiveFrame& ac
 
     current_frame_index_ = (active_frame.frame_index + 1) % MAX_FRAMES_IN_FLIGHT;
     return {};
+}
+
+void VulkanRenderer::begin_imgui_frame() {
+    ImGui_ImplVulkan_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
+}
+
+void VulkanRenderer::end_imgui_frame(VkCommandBuffer cmd) {
+    ImGui::Render();
+    ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
 }
 
 }  // namespace vanta::render

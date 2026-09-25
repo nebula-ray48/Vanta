@@ -1,0 +1,61 @@
+ウィンドウを作成しました。VulkanRenderer を初期化します...
+[Texture] device is null, skipping destruction
+Default texture registered at index: 0
+Warning: Could not load assets/textures/ibl/brdf_lut.png
+[IBL ERROR] Failed to load HDR file: "assets/textures/ibl/studio_small_04_4k/m0_px.hdr"
+Warning: Failed to load IBL Cubemap from assets/textures/ibl/studio_small_04_4k
+[Texture] device is null, skipping destruction
+[Texture] device is null, skipping destruction
+Shadow map registered at index: 1
+[Texture] device is null, skipping destruction
+SSAO noise texture generated
+[Texture] device is null, skipping destruction
+[Texture] device is null, skipping destruction
+[Texture] device is null, skipping destruction
+[Texture] device is null, skipping destruction
+VulkanRenderer の初期化に成功しました
+Image source is Array
+Image source is Array
+Image source is Array
+Image source is Array
+Image source is Array
+[Texture] device is null, skipping destruction
+[Texture] device is null, skipping destruction
+[Texture] device is null, skipping destruction
+Loaded GLTF texture:  (ID: 2, Format: sRGB)
+[Texture] device is null, skipping destruction
+[Texture] device is null, skipping destruction
+Loaded GLTF texture:  (ID: 3, Format: UNORM)
+[Texture] device is null, skipping destruction
+[Texture] device is null, skipping destruction
+[Texture] device is null, skipping destruction
+[Texture] device is null, skipping destruction
+[Texture] device is null, skipping destruction
+[Texture] device is null, skipping destruction
+Loaded GLTF texture:  (ID: 4, Format: sRGB)
+[Texture] device is null, skipping destruction
+[Texture] device is null, skipping destruction
+Loaded GLTF texture:  (ID: 5, Format: UNORM)
+[Texture] device is null, skipping destruction
+[Texture] device is null, skipping destruction
+Loaded GLTF texture:  (ID: 6, Format: UNORM)
+[Texture] device is null, skipping destruction
+Successfully loaded DamagedHelmet.gltf
+メインループを終了します。リソースを安全に破棄します...
+[Texture] Destroying texture with image: 0x400000000040
+textures_.size() = 7
+[Texture] Destroying texture with image: 0x6a000000006a
+[Texture] Destroying texture with image: 0x640000000064
+[Texture] Destroying texture with image: 0x5e000000005e
+[Texture] Destroying texture with image: 0x580000000058
+[Texture] Destroying texture with image: 0x520000000052
+[Texture] Destroying texture with image: 0x3a000000003a
+[Texture] Destroying texture with image: 0x360000000036
+Validation Error: [ VUID-vkDestroyDevice-device-05137 ] | MessageID = 0x4872eaa0
+vkDestroyDevice(): VkDevice 0x823134018 has 29 leaked objects that have not been destroyed.
+VkCommandBuffer 0x82328dc18, VkDeviceMemory 0x820000000082, VkDeviceMemory 0x800000000080, VkDeviceMemory 0x860000000086, VkDeviceMemory 0x780000000078, VkDeviceMemory 0x840000000084, VkDeviceMemory 0x880000000088, VkDeviceMemory 0x8a000000008a, VkBuffer 0x7f000000007f, VkBuffer 0x830000000083, VkBuffer 0x810000000081, VkBuffer 0x870000000087, VkBuffer 0x850000000085, VkBuffer 0x890000000089, VkImage 0x770000000077, VkImageView 0x790000000079, VkCommandPool 0x4f000000004f, VkShaderModule 0x4c000000004c, VkShaderModule 0x4d000000004d, VkPipeline 0x4e000000004e, VkPipelineLayout 0x4b000000004b, VkDescriptorSetLayout 0x450000000045, VkDescriptorSetLayout 0x460000000046, VkSampler 0x470000000047, VkSampler 0x490000000049, VkDescriptorSet 0x7a000000007a, VkDescriptorSet 0x4a000000004a, VkDescriptorSet 0x480000000048, VkDescriptorPool 0x440000000044
+The Vulkan spec states: All child objects created on device that can be destroyed or freed must have been destroyed or freed prior to destroying device (https://vulkan.lunarg.com/doc/view/1.4.350.0/mac/antora/spec/latest/chapters/devsandqueues.html#VUID-vkDestroyDevice-device-05137)
+
+VulkanRenderer child objects destroyed cleanly.
+[Texture] device is null, skipping destruction
+シャットダウン完了。GPU クラッシュは発生していません。

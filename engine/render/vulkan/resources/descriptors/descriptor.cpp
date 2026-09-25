@@ -20,35 +20,35 @@ namespace vanta::render {
             .binding = 0,
             .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
             .descriptorCount = 1,
-            .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+            .stageFlags = VK_SHADER_STAGE_ALL,
             .pImmutableSamplers = nullptr
         },
         VkDescriptorSetLayoutBinding{
             .binding = 1,
             .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
             .descriptorCount = MAX_BINDLESS_RESOURCES,
-            .stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS,
+            .stageFlags = VK_SHADER_STAGE_ALL,
             .pImmutableSamplers = nullptr
         },
         VkDescriptorSetLayoutBinding{
             .binding = 2,
             .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER,
             .descriptorCount = 1,
-            .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+            .stageFlags = VK_SHADER_STAGE_ALL,
             .pImmutableSamplers = nullptr
         },
         VkDescriptorSetLayoutBinding{
             .binding = 3,
             .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
             .descriptorCount = 1,
-            .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+            .stageFlags = VK_SHADER_STAGE_ALL,
             .pImmutableSamplers = nullptr
         },
         VkDescriptorSetLayoutBinding{
             .binding = 4,
             .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             .descriptorCount = 1,
-            .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+            .stageFlags = VK_SHADER_STAGE_ALL,
             .pImmutableSamplers = nullptr
         }
     };

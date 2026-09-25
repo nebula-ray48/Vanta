@@ -96,4 +96,14 @@ struct GraphicsPipeline {
     void destroy(VkDevice device) const noexcept;
 };
 
+struct ComputePipeline {
+    VkPipeline pipeline{VK_NULL_HANDLE};
+    void destroy(VkDevice device) const noexcept;
+};
+
+[[nodiscard]] std::expected<ComputePipeline, EngineError> build_compute_pipeline(
+    VkDevice device,
+    VkPipelineLayout layout,
+    VkShaderModule compute_shader) noexcept;
+
 }  // namespace vanta::render

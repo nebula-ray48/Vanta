@@ -3,31 +3,44 @@
 // SPDX-License-Identifier: BSD-2-Clause-Patent   //
 //------------------------------------------------//
 
-// Vulkan環境向けのリソースバインディング
-[[vk::binding(0, 0)]] Texture2D<float>   gDepthTex;       // 深度マップ
-[[vk::binding(1, 0)]] Texture2D<float3>  gNormalTex;      // 法線マップ (ビュー空間)
-[[vk::binding(2, 0)]] Texture2D<float3>  gNoiseTex;       // ランダム回転用のノイズマップ
-[[vk::binding(3, 0)]] RWTexture2D<float> gOutputTex;      // SSAO計算結果の出力先
+// Vulkan環境向けのリソースバインディング (Set 1)
+[[vk::binding(0, 1)]] Texture2D<float>   gDepthTex;       // 深度マップ
+[[vk::binding(1, 1)]] Texture2D<float3>  gNormalTex;      // 法線マップ (ビュー空間)
+[[vk::binding(2, 1)]] Texture2D<float3>  gNoiseTex;       // ランダム回転用のノイズマップ
+[[vk::binding(3, 1)]] RWTexture2D<float> gOutputTex;      // SSAO計算結果の出力先
 
-[[vk::binding(4, 0)]] SamplerState       gPointSampler;
+[[vk::binding(2, 0)]] SamplerState       defaultSampler; // Bindless set0 binding 2
 
-// ユニフォームバッファ（std140レイアウトを考慮したパッキング）
-struct SsaoUniforms
-{
+// ユニフォームバッファ
+struct GlobalUbo {
+    float4x4 viewProj;
+    float4x4 invViewProj;
+    float4x4 lightViewProj;
+    float3 cameraPos;
+    float _padding;
+    float4 sunDirection;
+    float4 sunColor;
+    float4 ambientColor;
+    float4 sh[9];
+    uint brdfLutIndex;
+    float maxReflectionLod;
+    uint shadowMapIndex;
+    uint ssaoMapIndex;
+    float4x4 viewMatrix;
     float4x4 projMatrix;
     float4x4 invProjMatrix;
-    float4   samples[64]; // Data-Oriented: float3は16バイトアライメントの都合上float4で定義する
+    float4   samples[64];
     float2   screenSize;
     float    radius;
     float    bias;
 };
 
-[[vk::binding(5, 0)]] ConstantBuffer<SsaoUniforms> ubo;
+[[vk::binding(0, 0)]] ConstantBuffer<GlobalUbo> ubo;
 
 // 画面座標からビュー空間の位置を再構築する関数
 float3 getPositionVS(float2 uv)
 {
-    float depth = gDepthTex.SampleLevel(gPointSampler, uv, 0).r;
+    float depth = gDepthTex.SampleLevel(defaultSampler, uv, 0).r;
 
     // Vulkanのクリップ空間 (Z: 0.0 ~ 1.0)
     float4 clipPos = float4(uv * 2.0 - 1.0, depth, 1.0);
@@ -47,11 +60,11 @@ void main(uint3 threadId : SV_DispatchThreadID)
 
     // 現在のピクセルのビュー空間位置と法線を取得
     float3 originVS = getPositionVS(uv);
-    float3 normalVS = normalize(gNormalTex.SampleLevel(gPointSampler, uv, 0).xyz);
+    float3 normalVS = normalize(gNormalTex.SampleLevel(defaultSampler, uv, 0).xyz);
 
     // ノイズテクスチャをタイル状に配置してランダムベクトルを取得
     float2 noiseUV = ubo.screenSize * uv / 4.0; 
-    float3 randomVec = normalize(gNoiseTex.SampleLevel(gPointSampler, noiseUV, 0).xyz);
+    float3 randomVec = normalize(gNoiseTex.SampleLevel(defaultSampler, noiseUV, 0).xyz * 2.0 - 1.0);
 
     // 法線とランダムベクトルから接空間（TBN行列）を作成
     float3 tangent = normalize(randomVec - normalVS * dot(randomVec, normalVS));

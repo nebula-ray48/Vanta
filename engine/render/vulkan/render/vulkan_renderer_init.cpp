@@ -6,12 +6,19 @@
 #include <array>
 #include <iostream>
 #include <utility>
+#include <random>
+#include <cmath>
 
 #include "assets/image_loader.hpp"
 #include "vulkan/resources/buffers/buffer.h"
 #include "vulkan/resources/descriptors/descriptor.h"
 #include "vulkan/resources/images/texture.h"
 #include "vulkan_renderer.h"
+#include "ext/glfw3.h"
+
+#include "imgui.h"
+#include "ext/imgui_impl_glfw.h"
+#include "ext/imgui_impl_vulkan.h"
 
 namespace vanta::render {
 namespace {
@@ -149,7 +156,7 @@ std::expected<void, EngineError> VulkanRenderer::initialize_textures() {
     if (shadow_tex_opt) {
         textures_.push_back(std::move(*shadow_tex_opt));
         shadow_map_index_ = static_cast<uint32_t>(textures_.size() - 1);
-        
+
         shadow_map_handle_ = registry_.register_imported_image(
             textures_.back().get_image(),
             textures_.back().get_view(),
@@ -172,6 +179,61 @@ std::expected<void, EngineError> VulkanRenderer::initialize_textures() {
         std::cout << "Shadow map registered at index: " << shadow_map_index_ << "\n";
     } else {
         std::cerr << "Warning: Failed to create shadow map\n";
+    }
+
+    // 4: SSAO Random Noise Texture & Samples
+    {
+        // 64 samples
+        std::uniform_real_distribution<float> random_floats(0.0, 1.0); // 0 to 1
+        std::default_random_engine generator;
+        for (uint32_t i = 0; i < 64; ++i) {
+            glm::vec3 sample(
+                random_floats(generator) * 2.0 - 1.0,
+                random_floats(generator) * 2.0 - 1.0,
+                random_floats(generator)
+            );
+            sample = glm::normalize(sample);
+            sample *= random_floats(generator);
+            // scale samples so they're more aligned to center of kernel
+            float scale = (float)i / 64.0f;
+            scale = std::lerp(0.1f, 1.0f, scale * scale);
+            sample *= scale;
+            ssao_samples_[i] = glm::vec4(sample, 0.0f);
+        }
+
+        // Noise Texture 4x4
+        auto* data_ptr = static_cast<uint8_t*>(malloc(16 * 4));
+        for (uint32_t i = 0; i < 16; i++) {
+            glm::vec3 noise(
+                random_floats(generator) * 2.0 - 1.0,
+                random_floats(generator) * 2.0 - 1.0,
+                0.0f);
+            noise = glm::normalize(noise);
+            data_ptr[i * 4 + 0] = static_cast<uint8_t>((noise.x * 0.5f + 0.5f) * 255.0f);
+            data_ptr[i * 4 + 1] = static_cast<uint8_t>((noise.y * 0.5f + 0.5f) * 255.0f);
+            data_ptr[i * 4 + 2] = static_cast<uint8_t>((noise.z * 0.5f + 0.5f) * 255.0f);
+            data_ptr[i * 4 + 3] = 255;
+        }
+
+        RawImage noise_image{
+            .width = 4,
+            .height = 4,
+            .channels = 4,
+            .data = StbImagePtr(data_ptr, stbi_image_free)
+        };
+
+        auto noise_tex_opt = vanta::vulkan::create_texture_from_image(
+            context_.device,
+            context_.physical_device,
+            frames_[current_frame_index_].graphics_command_pool,
+            context_.graphics_queue,
+            noise_image,
+            VK_FORMAT_R8G8B8A8_UNORM
+        );
+        if (noise_tex_opt) {
+            ssao_noise_tex_ = std::move(*noise_tex_opt);
+            std::cout << "SSAO noise texture generated\n";
+        }
     }
 
     return {};
@@ -213,6 +275,49 @@ std::expected<void, EngineError> VulkanRenderer::initialize_descriptor_resources
         .pBufferInfo = &object_info,
     };
     vkUpdateDescriptorSets(context_.device, 1, &write_object, 0, nullptr);
+
+    // --- SSAO Set 1 Descriptor Layout ---
+    std::array<VkDescriptorSetLayoutBinding, 4> ssao_bindings = {
+        VkDescriptorSetLayoutBinding{0, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
+        VkDescriptorSetLayoutBinding{1, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
+        VkDescriptorSetLayoutBinding{2, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
+        VkDescriptorSetLayoutBinding{3, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}
+    };
+
+    VkDescriptorSetLayoutCreateInfo ssao_layout_info{};
+    ssao_layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    ssao_layout_info.bindingCount = static_cast<uint32_t>(ssao_bindings.size());
+    ssao_layout_info.pBindings = ssao_bindings.data();
+
+    if (vkCreateDescriptorSetLayout(context_.device, &ssao_layout_info, nullptr, &ssao_layout_) != VK_SUCCESS) {
+        return std::unexpected(EngineError{LegacyError{"SSAO用DescriptorSetLayoutの作成に失敗しました"}});
+    }
+
+    std::array<VkDescriptorPoolSize, 2> ssao_pool_sizes = {
+        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, MAX_FRAMES_IN_FLIGHT * 3},
+        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, MAX_FRAMES_IN_FLIGHT}
+    };
+
+    VkDescriptorPoolCreateInfo ssao_pool_info{};
+    ssao_pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    ssao_pool_info.poolSizeCount = static_cast<uint32_t>(ssao_pool_sizes.size());
+    ssao_pool_info.pPoolSizes = ssao_pool_sizes.data();
+    ssao_pool_info.maxSets = MAX_FRAMES_IN_FLIGHT;
+
+    if (vkCreateDescriptorPool(context_.device, &ssao_pool_info, nullptr, &ssao_pool_) != VK_SUCCESS) {
+        return std::unexpected(EngineError{LegacyError{"SSAO用DescriptorPoolの作成に失敗しました"}});
+    }
+
+    std::vector<VkDescriptorSetLayout> ssao_layouts(MAX_FRAMES_IN_FLIGHT, ssao_layout_);
+    VkDescriptorSetAllocateInfo ssao_alloc_info{};
+    ssao_alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    ssao_alloc_info.descriptorPool = ssao_pool_;
+    ssao_alloc_info.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
+    ssao_alloc_info.pSetLayouts = ssao_layouts.data();
+
+    if (vkAllocateDescriptorSets(context_.device, &ssao_alloc_info, ssao_sets_.data()) != VK_SUCCESS) {
+        return std::unexpected(EngineError{LegacyError{"SSAO用DescriptorSetの割り当てに失敗しました"}});
+    }
 
     return {};
 }
@@ -257,8 +362,15 @@ std::expected<void, EngineError> VulkanRenderer::initialize_pipeline_resources()
         },
     };
 
-    std::array<VkDescriptorSetLayout, 1> const layouts = {
-        bindless_layout_   // Set 0
+    std::array<VkDescriptorSetLayout, 2> const layouts = {
+        bindless_layout_,  // Set 0
+        ssao_layout_       // Set 1
+    };
+
+    VkPushConstantRange const push_constant_range{
+        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
+        .offset = 0,
+        .size = 128 // 汎用的に128バイト(vec4 x 8個分)確保しておく
     };
 
     // 1. Pipeline Layout の作成
@@ -266,8 +378,8 @@ std::expected<void, EngineError> VulkanRenderer::initialize_pipeline_resources()
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .setLayoutCount = static_cast<uint32_t>(layouts.size()),
         .pSetLayouts = layouts.data(),
-        .pushConstantRangeCount = 0,
-        .pPushConstantRanges = nullptr
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges = &push_constant_range
     };
 
     if (vkCreatePipelineLayout(context_.device, &layout_info, nullptr, &pipeline_layout_) != VK_SUCCESS) {
@@ -303,20 +415,94 @@ std::expected<void, EngineError> VulkanRenderer::initialize_pipeline_resources()
     auto shadow_vert_module = create_shader_module(context_.device, *shadow_vert_spv);
     if (!shadow_vert_module) return std::unexpected(shadow_vert_module.error());
 
+    auto depth_normal_vert_spv = read_shader_file("assets/shaders/depth_normal_vert.spv");
+    if (!depth_normal_vert_spv) return std::unexpected(depth_normal_vert_spv.error());
+    auto depth_normal_frag_spv = read_shader_file("assets/shaders/depth_normal_frag.spv");
+    if (!depth_normal_frag_spv) return std::unexpected(depth_normal_frag_spv.error());
+
+    auto tonemap_vert_spv = read_shader_file("assets/shaders/tonemap_vert.spv");
+    if (!tonemap_vert_spv) return std::unexpected(tonemap_vert_spv.error());
+    auto tonemap_frag_spv = read_shader_file("assets/shaders/tonemap_frag.spv");
+    if (!tonemap_frag_spv) return std::unexpected(tonemap_frag_spv.error());
+    auto tonemap_vert_module = create_shader_module(context_.device, *tonemap_vert_spv);
+    if (!tonemap_vert_module) return std::unexpected(tonemap_vert_module.error());
+    auto tonemap_frag_module = create_shader_module(context_.device, *tonemap_frag_spv);
+    if (!tonemap_frag_module) return std::unexpected(tonemap_frag_module.error());
+    std::vector<VkPipelineShaderStageCreateInfo> tonemap_stages = {
+        VkPipelineShaderStageCreateInfo{.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                                        .stage  = VK_SHADER_STAGE_VERTEX_BIT,
+                                        .module = *tonemap_vert_module,
+                                        .pName  = "main"},
+        VkPipelineShaderStageCreateInfo{.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                                        .stage  = VK_SHADER_STAGE_FRAGMENT_BIT,
+                                        .module = *tonemap_frag_module,
+                                        .pName  = "main"}};
+
+    auto bloom_extract_vert_spv = read_shader_file("assets/shaders/bloom_extract_vert.spv");
+    if (!bloom_extract_vert_spv) return std::unexpected(bloom_extract_vert_spv.error());
+    auto bloom_extract_frag_spv = read_shader_file("assets/shaders/bloom_extract_frag.spv");
+    if (!bloom_extract_frag_spv) return std::unexpected(bloom_extract_frag_spv.error());
+    auto bloom_extract_vert_module = create_shader_module(context_.device, *bloom_extract_vert_spv);
+    if (!bloom_extract_vert_module) return std::unexpected(bloom_extract_vert_module.error());
+    auto bloom_extract_frag_module = create_shader_module(context_.device, *bloom_extract_frag_spv);
+    if (!bloom_extract_frag_module) return std::unexpected(bloom_extract_frag_module.error());
+    std::vector<VkPipelineShaderStageCreateInfo> bloom_extract_stages = {
+        VkPipelineShaderStageCreateInfo{.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                                        .stage  = VK_SHADER_STAGE_VERTEX_BIT,
+                                        .module = *bloom_extract_vert_module,
+                                        .pName  = "main"},
+        VkPipelineShaderStageCreateInfo{.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                                        .stage  = VK_SHADER_STAGE_FRAGMENT_BIT,
+                                        .module = *bloom_extract_frag_module,
+                                        .pName  = "main"}};
+
+    auto bloom_blur_vert_spv = read_shader_file("assets/shaders/bloom_blur_vert.spv");
+    if (!bloom_blur_vert_spv) return std::unexpected(bloom_blur_vert_spv.error());
+    auto bloom_blur_frag_spv = read_shader_file("assets/shaders/bloom_blur_frag.spv");
+    if (!bloom_blur_frag_spv) return std::unexpected(bloom_blur_frag_spv.error());
+    auto bloom_blur_vert_module = create_shader_module(context_.device, *bloom_blur_vert_spv);
+    if (!bloom_blur_vert_module) return std::unexpected(bloom_blur_vert_module.error());
+    auto bloom_blur_frag_module = create_shader_module(context_.device, *bloom_blur_frag_spv);
+    if (!bloom_blur_frag_module) return std::unexpected(bloom_blur_frag_module.error());
+    std::vector<VkPipelineShaderStageCreateInfo> bloom_blur_stages = {
+        VkPipelineShaderStageCreateInfo{.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                                        .stage  = VK_SHADER_STAGE_VERTEX_BIT,
+                                        .module = *bloom_blur_vert_module,
+                                        .pName  = "main"},
+        VkPipelineShaderStageCreateInfo{.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                                        .stage  = VK_SHADER_STAGE_FRAGMENT_BIT,
+                                        .module = *bloom_blur_frag_module,
+                                        .pName  = "main"}};
+
+    auto depth_normal_vert_module = create_shader_module(context_.device, *depth_normal_vert_spv);
+    if (!depth_normal_vert_module) return std::unexpected(depth_normal_vert_module.error());
+    auto depth_normal_frag_module = create_shader_module(context_.device, *depth_normal_frag_spv);
+    if (!depth_normal_frag_module) return std::unexpected(depth_normal_frag_module.error());
+
+    auto ssao_comp_spv = read_shader_file("assets/shaders/ssao_comp.spv");
+    if (!ssao_comp_spv) return std::unexpected(ssao_comp_spv.error());
+    auto ssao_comp_module = create_shader_module(context_.device, *ssao_comp_spv);
+    if (!ssao_comp_module) return std::unexpected(ssao_comp_module.error());
+
     std::vector<VkPipelineShaderStageCreateInfo> pbr_stages = {
         { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, *vert_module, "main", nullptr },
         { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT, *frag_module, "main", nullptr }
     };
-    
+
     std::vector<VkPipelineShaderStageCreateInfo> skybox_stages = {
         { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, *skybox_vert_module, "main", nullptr },
         { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT, *skybox_frag_module, "main", nullptr }
     };
-    
+
     std::vector<VkPipelineShaderStageCreateInfo> shadow_stages = {
         { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, *shadow_vert_module, "main", nullptr }
     };
-    
+
+    std::vector<VkPipelineShaderStageCreateInfo> depth_normal_stages = {
+        { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, *depth_normal_vert_module, "main", nullptr },
+        { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT, *depth_normal_frag_module, "main", nullptr }
+    };
+
     // TODO: Toon用のシェーダーが用意できたら別モジュールを読み込む
     // 今はとりあえず同じシェーダーを使う
     std::vector<VkPipelineShaderStageCreateInfo> toon_stages = pbr_stages;
@@ -343,7 +529,9 @@ std::expected<void, EngineError> VulkanRenderer::initialize_pipeline_resources()
         .pVertexAttributeDescriptions = attribute_descriptions.data()
     };
 
-    std::array<VkFormat, 1> color_formats = { swapchain_target_.format };
+    // RenderGraph で MainColorPass の出力先を HDR バッファにしたため、
+    // ここでビルドする PBR / Skybox 等のパイプラインも R16G16B16A16_SFLOAT に合わせる
+    std::array<VkFormat, 1> color_formats = { VK_FORMAT_R16G16B16A16_SFLOAT };
 
     // 4. 各パイプラインの作成
     PipelineBuilder builder;
@@ -354,6 +542,7 @@ std::expected<void, EngineError> VulkanRenderer::initialize_pipeline_resources()
     // PBR パイプライン (背面カリング)
     auto pbr_res = builder.with_shaders(pbr_stages)
                           .with_cull_mode(VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE)
+                          .with_depth_test(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS) // 修正: Z-prepassを使わず再描画するため標準のLESSにする
                           .build(context_.device, color_formats, VK_FORMAT_D32_SFLOAT);
     if (!pbr_res) {
         vkDestroyShaderModule(context_.device, *frag_module, nullptr);
@@ -366,6 +555,7 @@ std::expected<void, EngineError> VulkanRenderer::initialize_pipeline_resources()
         // Toon パイプライン (背面カリング)
         auto toon_res = builder.with_shaders(toon_stages)
                                .with_cull_mode(VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE)
+                               .with_depth_test(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS) // 同上
                                .build(context_.device, color_formats, VK_FORMAT_D32_SFLOAT);
         if (!toon_res) return std::unexpected(toon_res.error()); // TODO: エラーハンドリング整理
         toon_pipeline_.pipeline = *toon_res;
@@ -373,7 +563,7 @@ std::expected<void, EngineError> VulkanRenderer::initialize_pipeline_resources()
         // Toon Outline パイプライン (表面カリング)
         auto outline_res = builder.with_shaders(outline_stages)
                                   .with_cull_mode(VK_CULL_MODE_FRONT_BIT, VK_FRONT_FACE_CLOCKWISE)
-                                  // .with_depth_test(VK_TRUE, VK_FALSE, VK_COMPARE_OP_LESS_OR_EQUAL) // アウトライン特有の設定
+                                  .with_depth_test(VK_TRUE, VK_FALSE, VK_COMPARE_OP_LESS_OR_EQUAL) // アウトライン特有の設定
                                   .build(context_.device, color_formats, VK_FORMAT_D32_SFLOAT);
         if (!outline_res) return std::unexpected(outline_res.error());
         toon_outline_pipeline_.pipeline = *outline_res;
@@ -383,7 +573,7 @@ std::expected<void, EngineError> VulkanRenderer::initialize_pipeline_resources()
     VkPipelineVertexInputStateCreateInfo empty_vertex_input{
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO
     };
-    
+
     PipelineBuilder skybox_builder;
     skybox_builder.with_vertex_input(empty_vertex_input)
                   .with_viewport_state(viewport_state)
@@ -424,12 +614,82 @@ std::expected<void, EngineError> VulkanRenderer::initialize_pipeline_resources()
     if (!shadow_res) return std::unexpected(shadow_res.error());
     shadow_pipeline_.pipeline = *shadow_res;
 
-    // 後始末
+    // DepthNormal パイプライン
+    PipelineBuilder depth_normal_builder;
+    depth_normal_builder.with_vertex_input(vertex_input_info)
+                        .with_viewport_state(viewport_state)
+                        .with_layout(pipeline_layout_)
+                        .with_shaders(depth_normal_stages)
+                        .with_cull_mode(VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE)
+                        .with_depth_test(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL);
+
+    std::array<VkFormat, 1> depth_normal_color_formats = { VK_FORMAT_R16G16B16A16_SFLOAT };
+    auto depth_normal_res = depth_normal_builder.build(context_.device, depth_normal_color_formats, VK_FORMAT_D32_SFLOAT);
+    if (!depth_normal_res) return std::unexpected(depth_normal_res.error());
+    depth_normal_pipeline_.pipeline = *depth_normal_res;
+
+    // ToneMap パイプライン (フルスクリーン描画)
+    PipelineBuilder tonemap_builder;
+    tonemap_builder.with_vertex_input(empty_vertex_input) // 頂点バッファなし
+                   .with_viewport_state(viewport_state)
+                   .with_layout(pipeline_layout_)
+                   .with_shaders(tonemap_stages)
+                   .with_cull_mode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE)
+                   .with_depth_test(VK_FALSE, VK_FALSE, VK_COMPARE_OP_NEVER); // 深度テストなし
+
+    // スワップチェーンに描画するので Swapchain のフォーマット
+    std::array<VkFormat, 1> tonemap_color_formats = { swapchain_target_.format };
+    auto tonemap_res = tonemap_builder.build(context_.device, tonemap_color_formats, VK_FORMAT_UNDEFINED);
+    if (!tonemap_res) return std::unexpected(tonemap_res.error());
+    tonemap_pipeline_.pipeline = *tonemap_res;
+
+    // Bloom Extract パイプライン (フルスクリーン描画 -> HDRテクスチャ出力)
+    PipelineBuilder bloom_extract_builder;
+    bloom_extract_builder.with_vertex_input(empty_vertex_input)
+                         .with_viewport_state(viewport_state)
+                         .with_layout(pipeline_layout_)
+                         .with_shaders(bloom_extract_stages)
+                         .with_cull_mode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE)
+                         .with_depth_test(VK_FALSE, VK_FALSE, VK_COMPARE_OP_NEVER);
+
+    std::array<VkFormat, 1> bloom_extract_color_formats = { VK_FORMAT_R16G16B16A16_SFLOAT };
+    auto bloom_extract_res = bloom_extract_builder.build(context_.device, bloom_extract_color_formats, VK_FORMAT_UNDEFINED);
+    if (!bloom_extract_res) return std::unexpected(bloom_extract_res.error());
+    bloom_extract_pipeline_.pipeline = *bloom_extract_res;
+
+    // Bloom Blur (アナモルフィック・ストリーク) パイプライン (フルスクリーン描画 -> HDRテクスチャ出力)
+    PipelineBuilder bloom_blur_builder;
+    bloom_blur_builder.with_vertex_input(empty_vertex_input)
+                      .with_viewport_state(viewport_state)
+                      .with_layout(pipeline_layout_)
+                      .with_shaders(bloom_blur_stages)
+                      .with_cull_mode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE)
+                      .with_depth_test(VK_FALSE, VK_FALSE, VK_COMPARE_OP_NEVER);
+
+    std::array<VkFormat, 1> bloom_blur_color_formats = { VK_FORMAT_R16G16B16A16_SFLOAT };
+    auto bloom_blur_res = bloom_blur_builder.build(context_.device, bloom_blur_color_formats, VK_FORMAT_UNDEFINED);
+    if (!bloom_blur_res) return std::unexpected(bloom_blur_res.error());
+    bloom_blur_pipeline_.pipeline = *bloom_blur_res;
+
+    // SSAO コンピュートパイプライン
+    auto ssao_comp_res = build_compute_pipeline(context_.device, pipeline_layout_, *ssao_comp_module);
+    if (!ssao_comp_res) return std::unexpected(ssao_comp_res.error());
+    ssao_pipeline_ = *ssao_comp_res;
+
+    vkDestroyShaderModule(context_.device, *ssao_comp_module, nullptr);
+    vkDestroyShaderModule(context_.device, *depth_normal_frag_module, nullptr);
+    vkDestroyShaderModule(context_.device, *depth_normal_vert_module, nullptr);
     vkDestroyShaderModule(context_.device, *shadow_vert_module, nullptr);
     vkDestroyShaderModule(context_.device, *skybox_frag_module, nullptr);
     vkDestroyShaderModule(context_.device, *skybox_vert_module, nullptr);
     vkDestroyShaderModule(context_.device, *frag_module, nullptr);
     vkDestroyShaderModule(context_.device, *vert_module, nullptr);
+    vkDestroyShaderModule(context_.device, *tonemap_frag_module, nullptr);
+    vkDestroyShaderModule(context_.device, *tonemap_vert_module, nullptr);
+    vkDestroyShaderModule(context_.device, *bloom_extract_frag_module, nullptr);
+    vkDestroyShaderModule(context_.device, *bloom_extract_vert_module, nullptr);
+    vkDestroyShaderModule(context_.device, *bloom_blur_frag_module, nullptr);
+    vkDestroyShaderModule(context_.device, *bloom_blur_vert_module, nullptr);
 
     return {};
 }
@@ -514,6 +774,66 @@ std::expected<void, EngineError> VulkanRenderer::initialize_draw_buffers() {
     );
     if (!index_buffer) return std::unexpected(index_buffer.error());
     global_index_buffer_ = std::move(*index_buffer);
+
+    return {};
+}
+
+std::expected<void, EngineError> VulkanRenderer::initialize_imgui() {
+    VkDescriptorPoolSize pool_sizes[] = {
+        {VK_DESCRIPTOR_TYPE_SAMPLER, 1000},
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000},
+        {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000},
+        {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000},
+        {VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000},
+        {VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000},
+        {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000},
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000},
+        {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000},
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000},
+        {VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000}};
+
+    VkDescriptorPoolCreateInfo pool_info = {};
+    pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+    pool_info.maxSets = 1000;
+    pool_info.poolSizeCount = static_cast<uint32_t>(std::size(pool_sizes));
+    pool_info.pPoolSizes = pool_sizes;
+
+    if (vkCreateDescriptorPool(context_.device, &pool_info, nullptr, &imgui_pool_) != VK_SUCCESS) {
+        return std::unexpected(EngineError{LegacyError{"ImGui Descriptor Pool creation failed"}});
+    }
+
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    (void)io;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+
+    ImGui::StyleColorsDark();
+
+    ImGui_ImplGlfw_InitForVulkan(static_cast<GLFWwindow*>(config_.window_handle), true);
+
+    ImGui_ImplVulkan_InitInfo init_info = {};
+    init_info.Instance = context_.instance;
+    init_info.PhysicalDevice = context_.physical_device;
+    init_info.Device = context_.device;
+    init_info.QueueFamily = context_.graphics_queue_family_index;
+    init_info.Queue = context_.graphics_queue;
+    init_info.PipelineCache = VK_NULL_HANDLE;
+    init_info.DescriptorPool = imgui_pool_;
+    init_info.MinImageCount = 3;
+    init_info.ImageCount = 3;
+
+    init_info.UseDynamicRendering = true;
+    init_info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+    init_info.PipelineInfoMain.PipelineRenderingCreateInfo = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+        .colorAttachmentCount = 1,
+        .pColorAttachmentFormats = &swapchain_target_.format
+    };
+
+    ImGui_ImplVulkan_Init(&init_info);
 
     return {};
 }

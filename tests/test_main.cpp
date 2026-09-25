@@ -17,6 +17,7 @@
 #include "world/scene/mesh.h"
 #include "render/vulkan/render/vulkan_renderer.h"
 
+#include "imgui.h"
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -45,7 +46,7 @@ int main() {
     }
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 
     GLFWwindow* window = glfwCreateWindow(kWindowWidth, kWindowHeight, "Vanta - Vulkan Test", nullptr, nullptr);
     if (window == nullptr) {
@@ -55,6 +56,16 @@ int main() {
     }
 
     std::cout << "ウィンドウを作成しました。VulkanRenderer を初期化します...\n";
+
+    static bool g_framebuffer_resized = false;
+    static int g_new_width = kWindowWidth;
+    static int g_new_height = kWindowHeight;
+
+    glfwSetFramebufferSizeCallback(window, [](GLFWwindow*, int width, int height) {
+        g_framebuffer_resized = true;
+        g_new_width = width;
+        g_new_height = height;
+    });
 
     try {
         RendererConfig config;
@@ -97,12 +108,107 @@ int main() {
             g_scroll_y = yoffset;
         });
 
+        static bool is_fullscreen = false;
+        static int windowed_x = 100, windowed_y = 100;
+        static int windowed_w = kWindowWidth, windowed_h = kWindowHeight;
+
+        auto toggle_fullscreen = [&]() {
+            is_fullscreen = !is_fullscreen;
+            if (is_fullscreen) {
+                glfwGetWindowPos(window, &windowed_x, &windowed_y);
+                glfwGetWindowSize(window, &windowed_w, &windowed_h);
+                GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+                const GLFWvidmode* mode = glfwGetVideoMode(monitor);
+                glfwSetWindowMonitor(window, monitor, 0, 0, mode->width, mode->height, mode->refreshRate);
+            } else {
+                glfwSetWindowMonitor(window, nullptr, windowed_x, windowed_y, windowed_w, windowed_h, 0);
+            }
+        };
+
         uint64_t frame_count = 0;
         
         double last_time = glfwGetTime();
 
+        static bool auto_rotate_model = true;
+        static float model_rotation[3] = {90.0f, 0.0f, 0.0f}; // pitch, yaw, roll
+
+        static bool auto_rotate_sun = true;
+        static float sun_yaw = 0.0f;
+        static float sun_pitch = 45.0f;
+
+        static bool f11_pressed_last = false;
+
         while (!glfwWindowShouldClose(window)) {
             glfwPollEvents();
+
+            bool f11_pressed = glfwGetKey(window, GLFW_KEY_F11) == GLFW_PRESS;
+            if (f11_pressed && !f11_pressed_last) {
+                toggle_fullscreen();
+            }
+            f11_pressed_last = f11_pressed;
+
+            if (g_framebuffer_resized) {
+                if (g_new_width > 0 && g_new_height > 0) {
+                    (void)render.resize(static_cast<uint32_t>(g_new_width), static_cast<uint32_t>(g_new_height));
+                    camera.aspect_ratio = static_cast<float>(g_new_width) / static_cast<float>(g_new_height);
+                }
+                g_framebuffer_resized = false;
+            }
+            
+            render.begin_imgui_frame();
+            ImGui::Begin("Debug Panel");
+            ImGui::Text("Average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
+            if (ImGui::Button(is_fullscreen ? "Exit Fullscreen (F11)" : "Enter Fullscreen (F11)")) {
+                toggle_fullscreen();
+            }
+            ImGui::Separator();
+            
+            if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
+                ImGui::Checkbox("Auto Rotate Model", &auto_rotate_model);
+                if (!auto_rotate_model) {
+                    ImGui::SliderFloat3("Model Rotation", model_rotation, -360.0f, 360.0f);
+                }
+            }
+            
+            if (ImGui::CollapsingHeader("Lighting", ImGuiTreeNodeFlags_DefaultOpen)) {
+                ImGui::Checkbox("Auto Rotate Sun", &auto_rotate_sun);
+                if (!auto_rotate_sun) {
+                    ImGui::SliderFloat("Sun Yaw", &sun_yaw, 0.0f, 360.0f);
+                    ImGui::SliderFloat("Sun Pitch", &sun_pitch, -90.0f, 90.0f);
+                }
+            }
+            
+            if (ImGui::CollapsingHeader("Camera")) {
+                ImGui::Text("Position: %.2f, %.2f, %.2f", camera.position.x, camera.position.y, camera.position.z);
+                ImGui::Text("Yaw: %.2f, Pitch: %.2f", camera.yaw, camera.pitch);
+            }
+
+            if (ImGui::CollapsingHeader("Post-Processing & Bloom", ImGuiTreeNodeFlags_DefaultOpen)) {
+                auto& pp = render.post_process_settings();
+                ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "General");
+                ImGui::SliderFloat("Render Scale", &pp.render_scale, 0.1f, 1.0f, "%.2f");
+                ImGui::Checkbox("Enable SSAO", &pp.enable_ssao);
+                ImGui::Checkbox("Enable Bloom", &pp.enable_bloom);
+                ImGui::Separator();
+
+                ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Bloom / Anamorphic Streak");
+                ImGui::SliderFloat("Bloom Threshold", &pp.bloom_threshold, 0.5f, 10.0f, "%.2f");
+                ImGui::SliderFloat("Bloom Soft Knee", &pp.bloom_soft_knee, 0.0f, 1.0f, "%.2f");
+                ImGui::SliderFloat("Streak Length", &pp.streak_length, 0.0f, 10.0f, "%.2f");
+                ImGui::ColorEdit3("Streak Tint", pp.bloom_tint);
+                ImGui::SliderFloat("Bloom Intensity", &pp.bloom_intensity, 0.0f, 2.0f, "%.2f");
+
+                ImGui::Separator();
+                ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.4f, 1.0f), "Cinematic Tone & Lens");
+                ImGui::SliderFloat("Chromatic Aberration", &pp.ca_strength, 0.0f, 0.01f, "%.4f");
+                ImGui::SliderFloat("Saturation", &pp.saturation, 0.0f, 2.0f, "%.2f");
+                ImGui::SliderFloat("Contrast", &pp.contrast, 0.5f, 2.0f, "%.2f");
+                ImGui::SliderFloat("Vignette Radius", &pp.vignette_radius, 0.2f, 2.0f, "%.2f");
+                ImGui::SliderFloat("Vignette Smoothness", &pp.vignette_smoothness, 0.1f, 1.5f, "%.2f");
+                ImGui::SliderFloat("Film Grain", &pp.grain_amount, 0.0f, 0.05f, "%.4f");
+            }
+            
+            ImGui::End();
             
             double current_time = glfwGetTime();
             float delta_time = static_cast<float>(current_time - last_time);
@@ -117,8 +223,9 @@ int main() {
             snapshot.frame_number = frame_count++;
             snapshot.camera_pos = camera.position;
 
-            snapshot.view_matrix = vanta::scene::compute_projection_matrix(camera) *
-                                   vanta::scene::compute_view_matrix(camera);
+            snapshot.view_matrix = vanta::scene::compute_view_matrix(camera);
+            snapshot.proj_matrix = vanta::scene::compute_projection_matrix(camera);
+            snapshot.view_proj_matrix = snapshot.proj_matrix * snapshot.view_matrix;
 
             // DamagedHelmet を描画
             static bool scene_loaded = false;
@@ -135,15 +242,20 @@ int main() {
                 scene_loaded = true;
             }
 
-            float time = static_cast<float>(glfwGetTime());
+            if (auto_rotate_model) {
+                model_rotation[2] += delta_time * 30.0f;
+                if (model_rotation[2] > 360.0f) model_rotation[2] -= 360.0f;
+            }
+
             for (size_t i = 0; i < helmet_nodes.size(); ++i) {
                 const auto& node = helmet_nodes[i];
                 RenderInstance instance{};
                 instance.entity_id = { static_cast<uint32_t>(i) };
                 instance.mesh_id = node.mesh_id;
                 glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.0f));
-                model = glm::rotate(model, glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
-                model = glm::rotate(model, time * 0.5f, glm::vec3(0.0f, 0.0f, 1.0f));
+                model = glm::rotate(model, glm::radians(model_rotation[0]), glm::vec3(1.0f, 0.0f, 0.0f)); // pitch
+                model = glm::rotate(model, glm::radians(model_rotation[1]), glm::vec3(0.0f, 1.0f, 0.0f)); // yaw
+                model = glm::rotate(model, glm::radians(model_rotation[2]), glm::vec3(0.0f, 0.0f, 1.0f)); // roll
                 model = glm::scale(model, glm::vec3(2.0f));
                 
                 instance.model_matrix = model * node.global_transform;
@@ -152,7 +264,17 @@ int main() {
                 snapshot.instances.push_back(instance);
             }
 
-            snapshot.sun_direction = glm::vec3(std::cos(time * 0.5f), 1.0f, std::sin(time * 0.5f));
+            if (auto_rotate_sun) {
+                sun_yaw += delta_time * 30.0f;
+                if (sun_yaw > 360.0f) sun_yaw -= 360.0f;
+            }
+            float s_pitch = glm::radians(sun_pitch);
+            float s_yaw = glm::radians(sun_yaw);
+            snapshot.sun_direction = glm::vec3(
+                std::cos(s_pitch) * std::sin(s_yaw),
+                std::sin(s_pitch),
+                std::cos(s_pitch) * std::cos(s_yaw)
+            );
 
             if (auto draw_res = render.draw_frame(snapshot); !draw_res) {
                 std::cerr << "描画エラー: " << describe_error(draw_res.error()) << '\n';

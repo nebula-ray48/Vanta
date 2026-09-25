@@ -152,5 +152,35 @@ void GraphicsPipeline::destroy(VkDevice device) const noexcept {
     }
 }
 
+void ComputePipeline::destroy(VkDevice device) const noexcept {
+    if (pipeline != VK_NULL_HANDLE) {
+        vkDestroyPipeline(device, pipeline, nullptr);
+    }
+}
+
+std::expected<ComputePipeline, EngineError> build_compute_pipeline(
+    VkDevice device,
+    VkPipelineLayout layout,
+    VkShaderModule compute_shader) noexcept {
+    
+    VkPipelineShaderStageCreateInfo stage_info{};
+    stage_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stage_info.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    stage_info.module = compute_shader;
+    stage_info.pName = "main";
+    
+    VkComputePipelineCreateInfo create_info{};
+    create_info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    create_info.layout = layout;
+    create_info.stage = stage_info;
+    
+    VkPipeline pipeline;
+    if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &create_info, nullptr, &pipeline) != VK_SUCCESS) {
+        return std::unexpected(EngineError{LegacyError{"コンピュートパイプラインの作成に失敗しました"}});
+    }
+    
+    return ComputePipeline{pipeline};
+}
+
 }  // namespace vanta::render
 

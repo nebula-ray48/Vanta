@@ -6,6 +6,10 @@
 #include <iostream>
 #include <utility>
 
+#include "imgui.h"
+#include "ext/imgui_impl_glfw.h"
+#include "ext/imgui_impl_vulkan.h"
+
 #include "assets/gltf_loader.h"
 #include "assets/image_loader.hpp"
 #include "vulkan/resources/buffers/buffer.h"
@@ -37,9 +41,19 @@ VulkanRenderer& VulkanRenderer::operator=(VulkanRenderer&& other) noexcept {
         toon_outline_pipeline_ = std::move(other.toon_outline_pipeline_);
         skybox_pipeline_ = std::move(other.skybox_pipeline_);
         shadow_pipeline_ = std::move(other.shadow_pipeline_);
+        depth_normal_pipeline_ = std::move(other.depth_normal_pipeline_);
+        ssao_pipeline_ = std::move(other.ssao_pipeline_);
         bindless_layout_ = other.bindless_layout_;
         bindless_pool_ = other.bindless_pool_;
         global_bindless_set_ = other.global_bindless_set_;
+        tonemap_pipeline_ = std::move(other.tonemap_pipeline_);
+        bloom_extract_pipeline_ = std::move(other.bloom_extract_pipeline_);
+        bloom_blur_pipeline_ = std::move(other.bloom_blur_pipeline_);
+        ssao_layout_ = other.ssao_layout_;
+        ssao_pool_ = other.ssao_pool_;
+        ssao_sets_ = std::move(other.ssao_sets_);
+        ssao_noise_tex_ = std::move(other.ssao_noise_tex_);
+        ssao_samples_ = std::move(other.ssao_samples_);
         object_buffer_ = std::move(other.object_buffer_);
         indirect_buffer_ = std::move(other.indirect_buffer_);
         shadow_map_handle_ = std::move(other.shadow_map_handle_);
@@ -59,6 +73,11 @@ VulkanRenderer& VulkanRenderer::operator=(VulkanRenderer&& other) noexcept {
         other.bindless_layout_ = VK_NULL_HANDLE;
         other.bindless_pool_ = VK_NULL_HANDLE;
         other.global_bindless_set_ = VK_NULL_HANDLE;
+        other.ssao_layout_ = VK_NULL_HANDLE;
+        other.ssao_pool_ = VK_NULL_HANDLE;
+
+        imgui_pool_ = other.imgui_pool_;
+        other.imgui_pool_ = VK_NULL_HANDLE;
     }
     return *this;
 }
@@ -70,21 +89,48 @@ VulkanRenderer::~VulkanRenderer() {
 
     vkDeviceWaitIdle(context_.device);
 
+    registry_.clear_all(context_);
+
     meshes_.clear();
 
     for (auto& frame : frames_) {
         frame.destroy(context_);
     }
     swapchain_target_.destroy(context_.device);
-    
+
     pbr_pipeline_.destroy(context_.device);
     toon_pipeline_.destroy(context_.device);
+    tonemap_pipeline_.destroy(context_.device);
+    bloom_extract_pipeline_.destroy(context_.device);
+    bloom_blur_pipeline_.destroy(context_.device);
     toon_outline_pipeline_.destroy(context_.device);
     skybox_pipeline_.destroy(context_.device);
     shadow_pipeline_.destroy(context_.device);
+    depth_normal_pipeline_.destroy(context_.device);
+    ssao_pipeline_.destroy(context_.device);
     if (pipeline_layout_ != VK_NULL_HANDLE) {
+        if (imgui_pool_ != VK_NULL_HANDLE) {
+            ImGui_ImplVulkan_Shutdown();
+            ImGui_ImplGlfw_Shutdown();
+            ImGui::DestroyContext();
+            vkDestroyDescriptorPool(context_.device, imgui_pool_, nullptr);
+            imgui_pool_ = VK_NULL_HANDLE;
+        }
+
         vkDestroyPipelineLayout(context_.device, pipeline_layout_, nullptr);
         pipeline_layout_ = VK_NULL_HANDLE;
+    }
+
+    if (ssao_pool_ != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(context_.device, ssao_pool_, nullptr);
+        ssao_pool_ = VK_NULL_HANDLE;
+    }
+    if (ssao_layout_ != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(context_.device, ssao_layout_, nullptr);
+        ssao_layout_ = VK_NULL_HANDLE;
+    }
+    if (ssao_noise_tex_.has_value()) {
+        ssao_noise_tex_.reset();
     }
 
     global_ubo_buffer_.destroy(context_);
@@ -102,7 +148,8 @@ VulkanRenderer::~VulkanRenderer() {
         bindless_layout_ = VK_NULL_HANDLE;
     }
 
-    registry_.clear_pool(context_);
+    registry_.clear_all(context_);
+    std::cout << "textures_.size() = " << textures_.size() << std::endl;
     textures_.clear();
     env_cubemap_.reset();
 
@@ -179,6 +226,10 @@ std::expected<VulkanRenderer, EngineError> VulkanRenderer::create(
         return std::unexpected(texture_result.error());
     }
 
+    if (auto imgui_result = renderer.initialize_imgui(); !imgui_result) {
+        return std::unexpected(imgui_result.error());
+    }
+
     return renderer;
 }
 
@@ -194,7 +245,7 @@ std::expected<std::vector<vanta::render::VulkanRenderer::LoadedSceneNode>, std::
     for (const auto& img_data : scene.images) {
         uint32_t current_id = 0; // fallback
         std::expected<RawImage, TextureError> raw_img_opt = std::unexpected(TextureError::LoadFailed);
-        
+
         if (!img_data.uri.empty()) {
             auto tex_path = std::filesystem::path(filepath).parent_path() / img_data.uri;
             raw_img_opt = load_image(tex_path);
@@ -220,19 +271,19 @@ std::expected<std::vector<vanta::render::VulkanRenderer::LoadedSceneNode>, std::
                 *raw_img_opt,
                 format
             );
-            
+
             if (tex_opt) {
                 auto tex_id_opt = register_texture(std::move(*tex_opt));
                 if (tex_id_opt) {
                     current_id = *tex_id_opt;
-                    std::cout << "Loaded GLTF texture: " << img_data.name 
-                              << " (ID: " << current_id 
+                    std::cout << "Loaded GLTF texture: " << img_data.name
+                              << " (ID: " << current_id
                               << ", Format: " << (img_data.is_srgb ? "sRGB" : "UNORM") << ")\n";
                 }
             }
         }
-        
-        loaded_texture_ids.push_back(current_id); 
+
+        loaded_texture_ids.push_back(current_id);
     }
 
     // 2. マテリアルの変換
@@ -245,20 +296,20 @@ std::expected<std::vector<vanta::render::VulkanRenderer::LoadedSceneNode>, std::
         mat_data.pbr.roughness = mat.roughness_factor;
         mat_data.pbr.normal_scale = mat.normal_scale;
         mat_data.pbr.occlusion_strength = mat.occlusion_strength;
-        
-        mat_data.pbr.albedo_texture_id = (mat.base_color_texture_index >= 0 && static_cast<size_t>(mat.base_color_texture_index) < loaded_texture_ids.size()) 
+
+        mat_data.pbr.albedo_texture_id = (mat.base_color_texture_index >= 0 && static_cast<size_t>(mat.base_color_texture_index) < loaded_texture_ids.size())
             ? loaded_texture_ids[static_cast<size_t>(mat.base_color_texture_index)] : 0;
-            
-        mat_data.pbr.normal_texture_id = (mat.normal_texture_index >= 0 && static_cast<size_t>(mat.normal_texture_index) < loaded_texture_ids.size()) 
+
+        mat_data.pbr.normal_texture_id = (mat.normal_texture_index >= 0 && static_cast<size_t>(mat.normal_texture_index) < loaded_texture_ids.size())
             ? loaded_texture_ids[static_cast<size_t>(mat.normal_texture_index)] : 0;
-            
-        mat_data.pbr.mrm_texture_id = (mat.metallic_roughness_texture_index >= 0 && static_cast<size_t>(mat.metallic_roughness_texture_index) < loaded_texture_ids.size()) 
+
+        mat_data.pbr.mrm_texture_id = (mat.metallic_roughness_texture_index >= 0 && static_cast<size_t>(mat.metallic_roughness_texture_index) < loaded_texture_ids.size())
             ? loaded_texture_ids[static_cast<size_t>(mat.metallic_roughness_texture_index)] : 0;
-            
-        mat_data.pbr.emissive_texture_id = (mat.emissive_texture_index >= 0 && static_cast<size_t>(mat.emissive_texture_index) < loaded_texture_ids.size()) 
+
+        mat_data.pbr.emissive_texture_id = (mat.emissive_texture_index >= 0 && static_cast<size_t>(mat.emissive_texture_index) < loaded_texture_ids.size())
             ? loaded_texture_ids[static_cast<size_t>(mat.emissive_texture_index)] : 0;
 
-        mat_data.pbr.occlusion_texture_id = (mat.occlusion_texture_index >= 0 && static_cast<size_t>(mat.occlusion_texture_index) < loaded_texture_ids.size()) 
+        mat_data.pbr.occlusion_texture_id = (mat.occlusion_texture_index >= 0 && static_cast<size_t>(mat.occlusion_texture_index) < loaded_texture_ids.size())
             ? loaded_texture_ids[static_cast<size_t>(mat.occlusion_texture_index)] : 0;
 
         loaded_materials.push_back(mat_data);
@@ -272,14 +323,14 @@ std::expected<std::vector<vanta::render::VulkanRenderer::LoadedSceneNode>, std::
         void* mapped_vertex = nullptr;
         vmaMapMemory(context_.allocator, global_vertex_buffer_.allocation, &mapped_vertex);
         uint8_t* vertex_dst = static_cast<uint8_t*>(mapped_vertex) + (global_vertex_count_ * sizeof(Vertex));
-        
+
         std::vector<Vertex> render_vertices(scene.vertices.size());
         for (size_t i = 0; i < scene.vertices.size(); ++i) {
             render_vertices[i].position = scene.vertices[i].position;
             render_vertices[i].color = glm::vec3(1.0f);
             render_vertices[i].normal = scene.vertices[i].normal;
             render_vertices[i].uv = scene.vertices[i].uv;
-            render_vertices[i].texture_id = 0; 
+            render_vertices[i].texture_id = 0;
         }
         std::memcpy(vertex_dst, render_vertices.data(), vertex_data_size);
         vmaUnmapMemory(context_.allocator, global_vertex_buffer_.allocation);
@@ -351,7 +402,7 @@ std::expected<std::vector<vanta::render::VulkanRenderer::LoadedSceneNode>, std::
 
 std::expected<uint32_t, EngineError> vanta::render::VulkanRenderer::register_texture(vanta::vulkan::Texture&& texture) {
     uint32_t index = static_cast<uint32_t>(textures_.size());
-    
+
     // Binding 1 は bindlessTextures[]
     vanta::vulkan::BindlessManager::write_texture(
         context_.device,
@@ -360,9 +411,50 @@ std::expected<uint32_t, EngineError> vanta::render::VulkanRenderer::register_tex
         index,
         texture
     );
-    
+
     textures_.push_back(std::move(texture));
     return index;
+}
+
+std::expected<void, EngineError> VulkanRenderer::resize(uint32_t width, uint32_t height) {
+    if (width == 0 || height == 0) {
+        return {};
+    }
+
+    vkDeviceWaitIdle(context_.device);
+
+    for (auto handle : swapchain_image_handles_) {
+        registry_.destroy_image(context_, handle);
+    }
+    swapchain_image_handles_.clear();
+
+    swapchain_target_.destroy(context_.device);
+
+    auto new_swapchain = create_swapchain_target(context_, width, height);
+    if (!new_swapchain) {
+        return std::unexpected(new_swapchain.error());
+    }
+    swapchain_target_ = std::move(*new_swapchain);
+
+    for (size_t i = 0; i < swapchain_target_.images.size(); ++i) {
+        auto handle = registry_.register_imported_image(
+            swapchain_target_.images[i],
+            swapchain_target_.image_views[i],
+            ImageDescription{
+                .width = swapchain_target_.extent.width,
+                .height = swapchain_target_.extent.height,
+                .format = swapchain_target_.format,
+                .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+                .ownership = ResourceOwnership::IMPORTED,
+            }
+        );
+        swapchain_image_handles_.push_back(handle);
+    }
+
+    config_.window_width = width;
+    config_.window_height = height;
+
+    return {};
 }
 
 }  // namespace vanta::render

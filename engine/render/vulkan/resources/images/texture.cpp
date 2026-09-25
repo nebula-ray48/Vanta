@@ -44,10 +44,13 @@ Texture& Texture::operator=(Texture&& other) noexcept {
 
 Texture::~Texture() {
     if (device != VK_NULL_HANDLE) {
+        std::cout << "[Texture] Destroying texture with image: " << image << "\n";
         if (sampler != VK_NULL_HANDLE) vkDestroySampler(device, sampler, nullptr);
         if (image_view != VK_NULL_HANDLE) vkDestroyImageView(device, image_view, nullptr);
         if (image != VK_NULL_HANDLE) vkDestroyImage(device, image, nullptr);
         if (memory != VK_NULL_HANDLE) vkFreeMemory(device, memory, nullptr);
+    } else {
+        std::cout << "[Texture] device is null, skipping destruction\n";
     }
 }
 

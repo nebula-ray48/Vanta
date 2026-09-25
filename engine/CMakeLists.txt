@@ -3,6 +3,7 @@ find_package(glfw3 CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
 find_package(flatbuffers CONFIG REQUIRED)
 find_package(fastgltf CONFIG REQUIRED)
+find_package(imgui CONFIG REQUIRED)
 
 add_library(vanta_engine STATIC
         # Render
@@ -78,6 +79,10 @@ add_library(vanta_engine STATIC
         render/include/ext/glfw3.h
         render/include/ext/glfw_includeI_vulkan.cpp
         render/include/ext/stb_image.h
+        render/include/ext/imgui_impl_glfw.h
+        render/include/ext/imgui_impl_glfw.cpp
+        render/include/ext/imgui_impl_vulkan.h
+        render/include/ext/imgui_impl_vulkan.cpp
 )
 
 target_include_directories(vanta_engine PUBLIC
@@ -100,6 +105,7 @@ target_link_libraries(vanta_engine PUBLIC
         glm::glm
         flatbuffers::flatbuffers
         fastgltf::fastgltf
+        imgui::imgui
 )
 
 target_precompile_headers(vanta_engine PRIVATE

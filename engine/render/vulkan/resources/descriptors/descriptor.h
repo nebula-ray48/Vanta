@@ -27,7 +27,16 @@ namespace vanta::render {
         uint32_t brdf_lut_index;
         float max_reflection_lod;
         uint32_t shadow_map_index;
-        float _pad[1];
+        uint32_t ssao_map_index;
+        glm::mat4 view_matrix;
+        
+        // SSAO Params
+        glm::mat4 proj_matrix;
+        glm::mat4 inv_proj_matrix;
+        glm::vec4 ssao_samples[64];
+        glm::vec2 screen_size;
+        float ssao_radius;
+        float ssao_bias;
     };
 
     /**

@@ -72,11 +72,19 @@ namespace vanta::render {
             MaterialData material;
             glm::mat4 global_transform{1.0f};
         };
-        
+
         [[nodiscard]] std::expected<MeshId, EngineError> create_mesh_from_data(const MeshData& data);
         [[nodiscard]] std::expected<void, EngineError> draw_frame(const RenderSnapshot& snapshot);
+        [[nodiscard]] std::expected<void, EngineError> resize(uint32_t width, uint32_t height);
         [[nodiscard]] std::expected<std::vector<LoadedSceneNode>, std::string> load_scene(const std::string& filepath);
         [[nodiscard]] std::expected<uint32_t, EngineError> register_texture(vanta::vulkan::Texture&& texture);
+
+        // ImGui helpers for test application
+        void begin_imgui_frame();
+        void end_imgui_frame(VkCommandBuffer cmd);
+
+        [[nodiscard]] PostProcessSettings& post_process_settings() { return post_process_settings_; }
+        [[nodiscard]] const PostProcessSettings& post_process_settings() const { return post_process_settings_; }
 
     private:
         VulkanRenderer() = default;
@@ -91,7 +99,8 @@ namespace vanta::render {
         RendererConfig config_;
         VulkanContext context_;
         SwapchainTarget swapchain_target_;
-        
+        PostProcessSettings post_process_settings_{};
+
         // パイプライン群 (全て同じPipelineLayoutを共有)
         VkPipelineLayout pipeline_layout_{VK_NULL_HANDLE};
         GraphicsPipeline pbr_pipeline_;
@@ -99,7 +108,12 @@ namespace vanta::render {
         GraphicsPipeline toon_outline_pipeline_;
         GraphicsPipeline skybox_pipeline_;
         GraphicsPipeline shadow_pipeline_;
-        
+        GraphicsPipeline depth_normal_pipeline_;
+        GraphicsPipeline tonemap_pipeline_;
+        GraphicsPipeline bloom_extract_pipeline_;
+        GraphicsPipeline bloom_blur_pipeline_;
+        ComputePipeline ssao_pipeline_;
+
         std::array<FrameContext, MAX_FRAMES_IN_FLIGHT> frames_;
         uint32_t current_frame_index_{0};
 
@@ -113,13 +127,24 @@ namespace vanta::render {
         VkDescriptorPool bindless_pool_ = VK_NULL_HANDLE;
         VkDescriptorSet global_bindless_set_ = VK_NULL_HANDLE;
 
+        // SSAO Specific Descriptor (Set 1)
+        VkDescriptorSetLayout ssao_layout_ = VK_NULL_HANDLE;
+        VkDescriptorPool ssao_pool_ = VK_NULL_HANDLE;
+        std::array<VkDescriptorSet, MAX_FRAMES_IN_FLIGHT> ssao_sets_{VK_NULL_HANDLE};
+
+        // ImGui
+        VkDescriptorPool imgui_pool_ = VK_NULL_HANDLE;
+        [[nodiscard]] std::expected<void, EngineError> initialize_imgui();
+
         std::expected<void, EngineError> initialize_textures();
         std::vector<vanta::vulkan::Texture> textures_;
         std::optional<vanta::vulkan::Texture> env_cubemap_;
+        std::optional<vanta::vulkan::Texture> ssao_noise_tex_;
+        std::array<glm::vec4, 64> ssao_samples_{};
         uint32_t brdf_lut_index_ = 0;
-        
+
         uint32_t shadow_map_index_ = 0;
-        
+
         [[nodiscard]] FrameContext& current_frame() noexcept { return frames_[current_frame_index_]; }
 
         ResourceRegistry registry_;

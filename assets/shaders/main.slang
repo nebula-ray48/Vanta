@@ -41,7 +41,14 @@ struct GlobalUbo {
     uint brdfLutIndex;
     float maxReflectionLod;
     uint shadowMapIndex;
-    float _pad;
+    uint ssaoMapIndex;
+    float4x4 viewMatrix;
+    float4x4 projMatrix;
+    float4x4 invProjMatrix;
+    float4   samples[64];
+    float2   screenSize;
+    float    radius;
+    float    bias;
 };
 
 [[vk::binding(0, 0)]]
@@ -343,6 +350,14 @@ float4 fragmentMain(VertexOutput input) : SV_Target {
         float sampledAO = bindlessTextures[aoID].Sample(defaultSampler, input.uv).r;
         ao = 1.0 + matData.occlusion_strength * (sampledAO - 1.0);
     }
+    
+    // SSAOを反映
+    if (globalData.ssaoMapIndex != 0) {
+        uint ssaoID = NonUniformResourceIndex(globalData.ssaoMapIndex);
+        float2 screenUV = input.position.xy / globalData.screenSize;
+        float screenSSAO = bindlessTextures[ssaoID].SampleLevel(defaultSampler, screenUV, 0.0).r;
+        ao *= screenSSAO;
+    }
 
     float3 ambient = (diffuseIBL + specularIBL) * ao;
 
@@ -361,8 +376,9 @@ float4 fragmentMain(VertexOutput input) : SV_Target {
     float3 color = directLight + ambient + emissive;
 
     // ACES Filmic トーンマッピング と ガンマ補正 (Linear -> sRGB)
-    color = tonemapACESFilmic(color);
-    color = pow(color, float3(1.0 / 2.2));
+    // RenderGraph で HDR 出力とし、ポストプロセスでまとめてかけるためコメントアウト
+    // color = tonemapACESFilmic(color);
+    // color = pow(color, float3(1.0 / 2.2));
 
     return float4(color, matData.base_color.a);
 }
