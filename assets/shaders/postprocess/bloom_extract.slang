@@ -1,4 +1,10 @@
 // assets/shaders/bloom_extract.slang
+//------------------------------------------------//
+// Copyright (c) 2026 Nebula-Ray42.               //
+// SPDX-License-Identifier: BSD-2-Clause-Patent   //
+//------------------------------------------------//
+
+import common_bindings;
 
 struct PushConstants {
     uint hdr_texture_id;
@@ -6,9 +12,6 @@ struct PushConstants {
     float soft_knee;      // 例: 0.5f (滑らかに立ち上げる幅)
 };
 [[vk::push_constant]] ConstantBuffer<PushConstants> push_constants;
-
-[[vk::binding(1, 0)]] Texture2D global_textures[];
-[[vk::binding(2, 0)]] SamplerState global_sampler;
 
 struct VSOutput {
     float4 position : SV_Position;
@@ -31,7 +34,7 @@ float getLuminance(float3 color) {
 
 [shader("fragment")]
 float4 fs_main(VSOutput input) : SV_Target {
-    float3 color = global_textures[push_constants.hdr_texture_id].SampleLevel(global_sampler, input.uv, 0).rgb;
+    float3 color = bindlessTextures[push_constants.hdr_texture_id].SampleLevel(defaultSampler, input.uv, 0).rgb;
 
     float luma = getLuminance(color);
     float threshold = push_constants.threshold;

@@ -1,4 +1,10 @@
 // assets/shaders/bloom_blur.slang
+//------------------------------------------------//
+// Copyright (c) 2026 Nebula-Ray42.               //
+// SPDX-License-Identifier: BSD-2-Clause-Patent   //
+//------------------------------------------------//
+
+import common_bindings;
 
 struct PushConstants {
     uint input_texture_id;
@@ -11,9 +17,6 @@ struct PushConstants {
     float intensity;        // ブルーム強度 (例: 1.0f)
 };
 [[vk::push_constant]] ConstantBuffer<PushConstants> push_constants;
-
-[[vk::binding(1, 0)]] Texture2D global_textures[];
-[[vk::binding(2, 0)]] SamplerState global_sampler;
 
 struct VSOutput {
     float4 position : SV_Position;
@@ -39,7 +42,7 @@ float4 fs_main(VSOutput input) : SV_Target {
         float weight = exp(-abs(float(i)) * 0.16f);
         
         float2 offset = float2(float(i) * push_constants.streak_length * push_constants.texel_size_x, 0.0f);
-        float3 sampleColor = global_textures[push_constants.input_texture_id].SampleLevel(global_sampler, input.uv + offset, 0).rgb;
+        float3 sampleColor = bindlessTextures[push_constants.input_texture_id].SampleLevel(defaultSampler, input.uv + offset, 0).rgb;
         
         result += sampleColor * weight;
         totalWeight += weight;

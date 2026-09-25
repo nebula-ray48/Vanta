@@ -3,25 +3,8 @@
 // SPDX-License-Identifier: BSD-2-Clause-Patent   //
 //------------------------------------------------//
 
-struct GlobalUbo {
-    float4x4 viewProj;
-    float4x4 invViewProj;
-    float3 cameraPos;
-    float _padding;
-    float4 sunDirection;
-    float4 sunColor;
-    float4 ambientColor;
-    float4 sh[9];
-    uint brdfLutIndex;
-    float maxReflectionLod;
-    float2 _pad;
-};
-
-[[vk::binding(0, 0)]]
-ConstantBuffer<GlobalUbo> globalData;
-
-[[vk::binding(4, 0)]]
-SamplerCube envCubemap;
+import common_types;
+import common_bindings;
 
 struct SkyboxVertexOutput {
     float4 position : SV_Position;
@@ -48,6 +31,8 @@ SkyboxVertexOutput skyboxVertexMain(uint vertexId : SV_VertexID) {
 float4 skyboxFragmentMain(SkyboxVertexOutput input) : SV_Target {
     float3 dir = normalize(input.worldDir);
     float3 envColor = envCubemap.SampleLevel(dir, 0.0).rgb;
+
+    envColor *= globalData.skyboxIntensity;
 
     // HDR Tone mapping (Reinhard) and Gamma correction
     // RenderGraph で HDR 出力とし、ポストプロセスでまとめてかけるためコメントアウト

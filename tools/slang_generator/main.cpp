@@ -8,6 +8,7 @@
 
 #include <fstream>
 #include <iostream>
+#include <vector>
 #include <string>
 
 #include "generator_core.h"
@@ -15,12 +16,28 @@
 int main(int argc, char** argv) {
 
     if (argc < 3) {
-        std::cerr << "[Error] Usage: rey_slang_generator <input.slang> <output.h>\n";
+        std::cerr << "[Error] Usage: rey_slang_generator <input.slang> <output.h> [-I <include_path> ...]\n";
         return 1;
     }
 
-    const char* inputPath = argv[1];
-    const char* outputPath = argv[2];
+    const char* inputPath = nullptr;
+    const char* outputPath = nullptr;
+    std::vector<const char*> searchPaths;
+
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "-I" && i + 1 < argc) {
+            searchPaths.push_back(argv[++i]);
+        } else if (!inputPath) {
+            inputPath = argv[i];
+        } else if (!outputPath) {
+            outputPath = argv[i];
+        }
+    }
+
+    if (!inputPath || !outputPath) {
+        std::cerr << "[Error] Missing input or output paths.\n";
+        return 1;
+    }
 
     Slang::ComPtr<slang::IGlobalSession> globalSession;
     if (SLANG_FAILED(slang::createGlobalSession(globalSession.writeRef()))) {
@@ -33,6 +50,10 @@ int main(int argc, char** argv) {
 
     int translationUnitIndex = request->addTranslationUnit(SLANG_SOURCE_LANGUAGE_SLANG, nullptr);
     request->addTranslationUnitSourceFile(translationUnitIndex, inputPath);
+
+    for (const char* path : searchPaths) {
+        request->addSearchPath(path);
+    }
 
     int targetIndex = request->addCodeGenTarget(SLANG_SPIRV);
     request->setTargetProfile(targetIndex, globalSession->findProfile("sm_6_0"));

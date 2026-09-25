@@ -1,4 +1,10 @@
-import main;
+//------------------------------------------------//
+// Copyright (c) 2026 Nebula-Ray42.               //
+// SPDX-License-Identifier: BSD-2-Clause-Patent   //
+//------------------------------------------------//
+
+import common_types;
+import common_bindings;
 
 [shader("vertex")]
 VertexOutput mainVert(VertexInput input, uint instance_id : SV_InstanceID)

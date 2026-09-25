@@ -187,8 +187,17 @@ int main() {
                 auto& pp = render.post_process_settings();
                 ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "General");
                 ImGui::SliderFloat("Render Scale", &pp.render_scale, 0.1f, 1.0f, "%.2f");
+                ImGui::Checkbox("Enable Shadows", &pp.enable_shadows);
                 ImGui::Checkbox("Enable SSAO", &pp.enable_ssao);
                 ImGui::Checkbox("Enable Bloom", &pp.enable_bloom);
+                ImGui::Checkbox("Enable Skybox", &pp.enable_skybox);
+                
+                ImGui::Separator();
+                ImGui::TextColored(ImVec4(0.8f, 1.0f, 0.8f, 1.0f), "Environment & Exposure");
+                ImGui::SliderFloat("Exposure (EV)", &pp.exposure, -3.0f, 3.0f, "%.2f");
+                ImGui::SliderFloat("Skybox Brightness", &pp.skybox_intensity, 0.0f, 5.0f, "%.2f");
+                ImGui::SliderFloat("IBL Intensity", &pp.ibl_intensity, 0.0f, 5.0f, "%.2f");
+
                 ImGui::Separator();
 
                 ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Bloom / Anamorphic Streak");

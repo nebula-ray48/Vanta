@@ -141,6 +141,13 @@ struct PostProcessSettings {
     float render_scale = 1.0f;
     bool enable_ssao = true;
     bool enable_bloom = true;
+    bool enable_shadows = true;
+    bool enable_skybox = true;
+
+    // Environment & Exposure
+    float exposure = 1.0f;
+    float skybox_intensity = 1.0f;
+    float ibl_intensity = 1.0f;
 
     // Bloom
     float bloom_threshold = 3.0f;

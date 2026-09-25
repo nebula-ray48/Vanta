@@ -71,7 +71,7 @@ add_library(vanta_engine STATIC
         ${GENERATED_INCLUDE_DIR}/render_command_generated.h
 
         # Shaders
-        "${SHADER_DIR}/main.slang"
+        "${SHADER_DIR}/materials/pbr_only/pbr_main.slang"
 
         # Ext (Still in render/include/ext)
         render/include/ext/vk_mem_alloc.h

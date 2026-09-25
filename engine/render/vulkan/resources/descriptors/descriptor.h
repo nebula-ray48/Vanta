@@ -37,6 +37,11 @@ namespace vanta::render {
         glm::vec2 screen_size;
         float ssao_radius;
         float ssao_bias;
+        
+        // Exposure & Lighting
+        float ibl_intensity;
+        float skybox_intensity;
+        glm::vec2 _padding2;
     };
 
     /**

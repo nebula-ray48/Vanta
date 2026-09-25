@@ -48,14 +48,17 @@ GlobalUbo VulkanRenderer::build_global_ubo(const RenderSnapshot& snapshot) const
         },
         .brdf_lut_index = brdf_lut_index_,
         .max_reflection_lod = 5.0f,
-        .shadow_map_index = shadow_map_index_,
-        .ssao_map_index = 500, // This will be set right before MainColorPass
+        .shadow_map_index = post_process_settings_.enable_shadows ? shadow_map_index_ : 0u,
+        .ssao_map_index = post_process_settings_.enable_ssao ? 500u : 0u, // This will be set right before MainColorPass
         .view_matrix = snapshot.view_matrix,
         .proj_matrix = snapshot.proj_matrix,
         .inv_proj_matrix = glm::inverse(snapshot.proj_matrix),
         .screen_size = glm::vec2(swapchain_target_.extent.width, swapchain_target_.extent.height),
         .ssao_radius = 0.5f,
-        .ssao_bias = 0.025f
+        .ssao_bias = 0.025f,
+        .ibl_intensity = post_process_settings_.ibl_intensity,
+        .skybox_intensity = post_process_settings_.skybox_intensity,
+        ._padding2 = glm::vec2(0.0f)
     };
     for (int i = 0; i < 64; ++i) {
         ubo.ssao_samples[i] = ssao_samples_[i];
@@ -198,8 +201,9 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
         },
         fg::UsageType::Undefined);
 
-    graph_builder.add_pass("ShadowPass")
-        .write_image(shadow_map_handle_, fg::UsageType::DepthAttachment)
+    if (post_process_settings_.enable_shadows) {
+        graph_builder.add_pass("ShadowPass")
+            .write_image(shadow_map_handle_, fg::UsageType::DepthAttachment)
         .execute([this, &snapshot](const fg::PassContext& ctx) {
             VkCommandBuffer cmd = ctx.command_buffer();
             
@@ -261,6 +265,7 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
 
             vkCmdEndRendering(cmd);
         });
+    }
 
     graph_builder.add_pass("DepthNormalPass")
         .write_image(normal_image, fg::UsageType::ColorAttachment)
@@ -508,7 +513,7 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
             }
 
             // Skybox描画
-            if (skybox_pipeline_.pipeline != VK_NULL_HANDLE) {
+            if (post_process_settings_.enable_skybox && skybox_pipeline_.pipeline != VK_NULL_HANDLE && env_cubemap_.has_value()) {
                 vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, skybox_pipeline_.pipeline);
                 vkCmdDraw(cmd, 3, 1, 0, 0); // 頂点バッファなしでフルスクリーン三角形を描画
             }
@@ -784,7 +789,7 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
                 float vignette_radius;
                 float vignette_smoothness;
                 float grain_amount;
-                float _pad;
+                float exposure;
             } pc = {
                 .hdr_texture_id = hdr_tex_index,
                 .bloom_texture_id = bloom_tex_index,
@@ -795,7 +800,7 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
                 .vignette_radius = post_process_settings_.vignette_radius,
                 .vignette_smoothness = post_process_settings_.vignette_smoothness,
                 .grain_amount = post_process_settings_.grain_amount,
-                ._pad = 0.0f,
+                .exposure = post_process_settings_.exposure,
             };
             vkCmdPushConstants(
                 cmd, pipeline_layout_,

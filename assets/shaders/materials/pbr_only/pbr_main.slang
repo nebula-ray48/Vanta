@@ -3,201 +3,10 @@
 // SPDX-License-Identifier: BSD-2-Clause-Patent   //
 //------------------------------------------------//
 
-// ==========================================
-// 1. データ構造の定義
-// ==========================================
-struct VertexInput {
-    [[vk::location(0)]] float3 position : POSITION;
-    [[vk::location(1)]] float3 color : COLOR;
-    [[vk::location(2)]] float3 normalDir : NORMAL;
-    [[vk::location(3)]] float2 uv : TEXCOORD;
-    [[vk::location(4)]] uint textureId : TEXINDEX;
-};
+import common_types;
+import common_bindings;
+import common_lighting;
 
-struct VertexOutput {
-    float4 position : SV_Position;
-    float3 worldPos : WORLDPOS;
-    float3 color : COLOR;
-    float3 normalDir : NORMAL;
-    float2 uv : TEXCOORD;
-    nointerpolation uint instanceId : INSTANCEID;
-};
-
-// ==========================================
-// 2. 外部からのデータ受け入れ口
-// ==========================================
-
-// --- Set 0: グローバルデータ ---
-struct GlobalUbo {
-    float4x4 viewProj;
-    float4x4 invViewProj;
-    float4x4 lightViewProj;
-    float3 cameraPos;
-    float _padding;
-    float4 sunDirection; // w = intensity
-    float4 sunColor;
-    float4 ambientColor;
-    float4 sh[9];
-    uint brdfLutIndex;
-    float maxReflectionLod;
-    uint shadowMapIndex;
-    uint ssaoMapIndex;
-    float4x4 viewMatrix;
-    float4x4 projMatrix;
-    float4x4 invProjMatrix;
-    float4   samples[64];
-    float2   screenSize;
-    float    radius;
-    float    bias;
-};
-
-[[vk::binding(0, 0)]]
-ConstantBuffer<GlobalUbo> globalData;
-
-// --- Set 0: Bindless リソース ---
-[[vk::binding(1, 0)]]
-Texture2D bindlessTextures[];
-
-[[vk::binding(2, 0)]]
-SamplerState defaultSampler;
-
-// --- Set 0: Object Data (SSBO) ---
-struct ObjectData {
-    float4x4 model_matrix;
-    uint data[16];
-};
-
-struct PbrMaterialData {
-    float4 base_color;
-    float metallic;
-    float roughness;
-    float normal_scale;
-    float occlusion_strength;
-    uint albedo_texture_id;
-    uint normal_texture_id;
-    uint mrm_texture_id;
-    uint emissive_texture_id;
-    uint occlusion_texture_id;
-};
-
-PbrMaterialData unpackPbrMaterial(ObjectData objData) {
-    PbrMaterialData mat;
-    mat.base_color = asfloat(uint4(objData.data[0], objData.data[1], objData.data[2], objData.data[3]));
-    mat.metallic = asfloat(objData.data[4]);
-    mat.roughness = asfloat(objData.data[5]);
-    mat.normal_scale = asfloat(objData.data[6]);
-    mat.occlusion_strength = asfloat(objData.data[7]);
-    mat.albedo_texture_id = objData.data[8];
-    mat.normal_texture_id = objData.data[9];
-    mat.mrm_texture_id = objData.data[10];
-    mat.emissive_texture_id = objData.data[11];
-    mat.occlusion_texture_id = objData.data[12];
-    return mat;
-}
-
-[[vk::binding(3, 0)]]
-StructuredBuffer<ObjectData> objectBuffer;
-
-// --- Set 0: IBL リソース ---
-[[vk::binding(4, 0)]]
-SamplerCube envCubemap;
-
-// ==========================================
-// 3. PBR & IBL Helper Functions
-// ==========================================
-static const float PI = 3.14159265359;
-
-float3 evaluateSphericalHarmonics(float3 N) {
-    // L0
-    float3 c = globalData.sh[0].rgb;
-    // L1
-    c += globalData.sh[1].rgb * N.y;
-    c += globalData.sh[2].rgb * N.z;
-    c += globalData.sh[3].rgb * N.x;
-    // L2
-    c += globalData.sh[4].rgb * (N.x * N.y);
-    c += globalData.sh[5].rgb * (N.y * N.z);
-    c += globalData.sh[6].rgb * (3.0 * N.z * N.z - 1.0);
-    c += globalData.sh[7].rgb * (N.x * N.z);
-    c += globalData.sh[8].rgb * (N.x * N.x - N.y * N.y);
-    return max(c, float3(0.0));
-}
-
-float DistributionGGX(float3 N, float3 H, float roughness) {
-    float a = roughness * roughness;
-    float a2 = a * a;
-    float NdotH = max(dot(N, H), 0.0);
-    float NdotH2 = NdotH * NdotH;
-
-    float nom   = a2;
-    float denom = (NdotH2 * (a2 - 1.0) + 1.0);
-    denom = PI * denom * denom;
-
-    return nom / max(denom, 0.000001);
-}
-
-float GeometrySchlickGGX(float NdotV, float roughness) {
-    float r = (roughness + 1.0);
-    float k = (r * r) / 8.0;
-
-    float nom   = NdotV;
-    float denom = NdotV * (1.0 - k) + k;
-
-    return nom / denom;
-}
-
-float GeometrySmith(float3 N, float3 V, float3 L, float roughness) {
-    float NdotV = max(dot(N, V), 0.0);
-    float NdotL = max(dot(N, L), 0.0);
-    float ggx2 = GeometrySchlickGGX(NdotV, roughness);
-    float ggx1 = GeometrySchlickGGX(NdotL, roughness);
-
-    return ggx1 * ggx2;
-}
-
-float3 FresnelSchlick(float cosTheta, float3 F0) {
-    return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
-}
-
-float3 FresnelSchlickRoughness(float cosTheta, float3 F0, float roughness) {
-    return F0 + (max(float3(1.0 - roughness), F0) - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
-}
-
-float3 tonemapACESFilmic(float3 x) {
-    const float a = 2.51f;
-    const float b = 0.03f;
-    const float c = 2.43f;
-    const float d = 0.59f;
-    const float e = 0.14f;
-    return saturate((x * (a * x + b)) / (x * (c * x + d) + e));
-}
-
-// フラグメントシェーダー内で法線マップからワールド空間法線を計算する関数
-float3 getNormalFromMap(
-    Texture2D normalMap,
-    SamplerState texSampler,
-    float2 uv,
-    float3 worldPos,
-    float3 worldNormal,
-    float normalScale
-) {
-    // 1. 法線マップのサンプリング [0, 1] -> [-1, 1]
-    float3 tangentNormal = normalMap.Sample(texSampler, uv).xyz * 2.0 - 1.0;
-    tangentNormal = normalize(float3(tangentNormal.xy * normalScale, tangentNormal.z));
-
-    // 2. 画面微小微分から UV と 座標の傾きを計算
-    float3 dPos1 = ddx(worldPos);
-    float3 dPos2 = ddy(worldPos);
-    float2 dUV1  = ddx(uv);
-    float2 dUV2  = ddy(uv);
-    // 3. 接線 (Tangent) と 従接線 (Bitangent) を導出
-    float3 N = normalize(worldNormal);
-    float3 T = normalize(dPos1 * dUV2.y - dPos2 * dUV1.y);
-    float3 B = -normalize(cross(N, T)); // 座標系に合わせて符号調整
-    float3x3 TBN = float3x3(T, B, N);
-    // 4. 接線空間からワールド空間へ変換
-    return normalize(mul(tangentNormal, TBN));
-}
 
 // ==========================================
 // 4. 処理ロジック
@@ -332,7 +141,7 @@ float4 fragmentMain(VertexOutput input) : SV_Target {
     float3 kD_ambient = (float3(1.0) - kS_ambient) * (1.0 - metallic);
 
     float3 irradiance = evaluateSphericalHarmonics(N);
-    float3 diffuseIBL = irradiance * albedo * kD_ambient;
+    float3 diffuseIBL = irradiance * albedo * kD_ambient * globalData.iblIntensity;
 
     // (B) Specular Radiance (Prefiltered Cubemap + BRDF LUT)
     float3 R = reflect(-V, N);
@@ -341,7 +150,7 @@ float4 fragmentMain(VertexOutput input) : SV_Target {
 
     uint brdfLutID = NonUniformResourceIndex(globalData.brdfLutIndex);
     float2 brdf = bindlessTextures[brdfLutID].Sample(defaultSampler, float2(NdotV, roughness)).rg;
-    float3 specularIBL = prefilteredColor * (F0 * brdf.x + brdf.y);
+    float3 specularIBL = prefilteredColor * (F0 * brdf.x + brdf.y) * globalData.iblIntensity;
 
     // --- AO (Ambient Occlusion) ---
     float ao = 1.0;
