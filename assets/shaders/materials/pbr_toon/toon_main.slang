@@ -43,9 +43,7 @@ float4 fragmentMain(VertexOutput input) : SV_Target {
     // 法線(N) と 太陽光ベクトル(L)
     float3 N = normalize(input.normalDir);
     float3 L = normalize(globalData.sunDirection.xyz);
-    // ---------------------------------------------------------
-    // ★ ここであなたのコードが活躍！
-    // ---------------------------------------------------------
+
     float ramp = calculate_toon_diffuse(N, L, 0.4, 0.02);
     float3 lightColor = baseColor * globalData.sunColor.rgb;
     float3 shadowColor = baseColor * float3(0.5, 0.5, 0.7); // 影色（青みブレンド）
