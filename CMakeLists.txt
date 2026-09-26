@@ -39,6 +39,8 @@ set(SPV_TOON_FRAG "${SHADER_DIR}/toon_frag.spv")
 set(SPV_SKYBOX_VERT "${SHADER_DIR}/skybox_vert.spv")
 set(SPV_SKYBOX_FRAG "${SHADER_DIR}/skybox_frag.spv")
 set(SPV_SHADOW_VERT "${SHADER_DIR}/shadow_vert.spv")
+set(SPV_TOON_OUTLINE_VERT "${SHADER_DIR}/toon_outline_vert.spv")
+set(SPV_TOON_OUTLINE_FRAG "${SHADER_DIR}/toon_outline_frag.spv")
 set(SPV_SSAO_COMP "${SHADER_DIR}/ssao_comp.spv")
 set(SPV_DEPTH_NORMAL_VERT "${SHADER_DIR}/depth_normal_vert.spv")
 set(SPV_DEPTH_NORMAL_FRAG "${SHADER_DIR}/depth_normal_frag.spv")
@@ -51,11 +53,13 @@ set(SPV_BLOOM_BLUR_FRAG "${SHADER_DIR}/bloom_blur_frag.spv")
 set(CPP_REFLECTION_HEADER "${GENERATED_INCLUDE_DIR}/shader_reflection.h")
 
 add_custom_command(
-        OUTPUT ${SPV_VERT} ${SPV_FRAG} ${SPV_TOON_VERT} ${SPV_TOON_FRAG} ${SPV_SKYBOX_VERT} ${SPV_SKYBOX_FRAG} ${SPV_SHADOW_VERT} ${SPV_SSAO_COMP} ${SPV_DEPTH_NORMAL_VERT} ${SPV_DEPTH_NORMAL_FRAG} ${SPV_TONEMAP_VERT} ${SPV_TONEMAP_FRAG} ${SPV_BLOOM_EXTRACT_VERT} ${SPV_BLOOM_EXTRACT_FRAG} ${SPV_BLOOM_BLUR_VERT} ${SPV_BLOOM_BLUR_FRAG} ${CPP_REFLECTION_HEADER}
+        OUTPUT ${SPV_VERT} ${SPV_FRAG} ${SPV_TOON_VERT} ${SPV_TOON_FRAG} ${SPV_TOON_OUTLINE_VERT} ${SPV_TOON_OUTLINE_FRAG} ${SPV_SKYBOX_VERT} ${SPV_SKYBOX_FRAG} ${SPV_SHADOW_VERT} ${SPV_SSAO_COMP} ${SPV_DEPTH_NORMAL_VERT} ${SPV_DEPTH_NORMAL_FRAG} ${SPV_TONEMAP_VERT} ${SPV_TONEMAP_FRAG} ${SPV_BLOOM_EXTRACT_VERT} ${SPV_BLOOM_EXTRACT_FRAG} ${SPV_BLOOM_BLUR_VERT} ${SPV_BLOOM_BLUR_FRAG} ${CPP_REFLECTION_HEADER}
         COMMAND ${SLANGC_EXECUTABLE} "${SHADER_DIR}/materials/pbr_only/pbr_main.slang" -I "${SHADER_DIR}" -I "${SHADER_DIR}/common" -target spirv -entry vertexMain -stage vertex -o ${SPV_VERT}
         COMMAND ${SLANGC_EXECUTABLE} "${SHADER_DIR}/materials/pbr_only/pbr_main.slang" -I "${SHADER_DIR}" -I "${SHADER_DIR}/common" -target spirv -entry fragmentMain -stage fragment -o ${SPV_FRAG}
         COMMAND ${SLANGC_EXECUTABLE} "${SHADER_DIR}/materials/toon/toon_main.slang" -I "${SHADER_DIR}" -I "${SHADER_DIR}/common" -target spirv -entry vertexMain -stage vertex -o ${SPV_TOON_VERT}
         COMMAND ${SLANGC_EXECUTABLE} "${SHADER_DIR}/materials/toon/toon_main.slang" -I "${SHADER_DIR}" -I "${SHADER_DIR}/common" -target spirv -entry fragmentMain -stage fragment -o ${SPV_TOON_FRAG}
+        COMMAND ${SLANGC_EXECUTABLE} "${SHADER_DIR}/materials/toon/toon_outline.slang" -I "${SHADER_DIR}" -I "${SHADER_DIR}/common" -target spirv -entry vertexMain -stage vertex -o ${SPV_TOON_OUTLINE_VERT}
+        COMMAND ${SLANGC_EXECUTABLE} "${SHADER_DIR}/materials/toon/toon_outline.slang" -I "${SHADER_DIR}" -I "${SHADER_DIR}/common" -target spirv -entry fragmentMain -stage fragment -o ${SPV_TOON_OUTLINE_FRAG}
         COMMAND ${SLANGC_EXECUTABLE} "${SHADER_DIR}/passes/environment/skybox.slang" -I "${SHADER_DIR}" -I "${SHADER_DIR}/common" -target spirv -entry skyboxVertexMain -stage vertex -o ${SPV_SKYBOX_VERT}
         COMMAND ${SLANGC_EXECUTABLE} "${SHADER_DIR}/passes/environment/skybox.slang" -I "${SHADER_DIR}" -I "${SHADER_DIR}/common" -target spirv -entry skyboxFragmentMain -stage fragment -o ${SPV_SKYBOX_FRAG}
         COMMAND ${SLANGC_EXECUTABLE} "${SHADER_DIR}/passes/shadow/shadow.slang" -I "${SHADER_DIR}" -I "${SHADER_DIR}/common" -target spirv -entry mainVert -stage vertex -o ${SPV_SHADOW_VERT}
@@ -77,7 +81,7 @@ add_custom_command(
 )
 
 add_custom_target(generate_shaders ALL
-        DEPENDS ${SPV_VERT} ${SPV_FRAG} ${SPV_TOON_VERT} ${SPV_TOON_FRAG} ${SPV_SKYBOX_VERT} ${SPV_SKYBOX_FRAG} ${SPV_SHADOW_VERT} ${SPV_SSAO_COMP} ${SPV_DEPTH_NORMAL_VERT} ${SPV_DEPTH_NORMAL_FRAG} ${SPV_TONEMAP_VERT} ${SPV_TONEMAP_FRAG} ${SPV_BLOOM_EXTRACT_VERT} ${SPV_BLOOM_EXTRACT_FRAG} ${SPV_BLOOM_BLUR_VERT} ${SPV_BLOOM_BLUR_FRAG} ${CPP_REFLECTION_HEADER}
+        DEPENDS ${SPV_VERT} ${SPV_FRAG} ${SPV_TOON_VERT} ${SPV_TOON_FRAG} ${SPV_TOON_OUTLINE_VERT} ${SPV_TOON_OUTLINE_FRAG} ${SPV_SKYBOX_VERT} ${SPV_SKYBOX_FRAG} ${SPV_SHADOW_VERT} ${SPV_SSAO_COMP} ${SPV_DEPTH_NORMAL_VERT} ${SPV_DEPTH_NORMAL_FRAG} ${SPV_TONEMAP_VERT} ${SPV_TONEMAP_FRAG} ${SPV_BLOOM_EXTRACT_VERT} ${SPV_BLOOM_EXTRACT_FRAG} ${SPV_BLOOM_BLUR_VERT} ${SPV_BLOOM_BLUR_FRAG} ${CPP_REFLECTION_HEADER}
 )
 
 

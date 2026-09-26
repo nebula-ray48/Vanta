@@ -137,8 +137,11 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
             std::memcpy(&object_data[instance_idx].data[8], &instance.material.toon.outline_width, sizeof(float));
             std::memcpy(&object_data[instance_idx].data[9], &instance.material.toon.threshold, sizeof(float));
             std::memcpy(&object_data[instance_idx].data[10], &instance.material.toon.feather, sizeof(float));
-            object_data[instance_idx].data[11] = instance.material.toon.albedo_texture_id;
-            object_data[instance_idx].data[12] = instance.material.toon.shade_texture_id;
+            std::memcpy(&object_data[instance_idx].data[11], &instance.material.toon.normal_scale, sizeof(float));
+            object_data[instance_idx].data[12] = instance.material.toon.albedo_texture_id;
+            object_data[instance_idx].data[13] = instance.material.toon.shade_texture_id;
+            object_data[instance_idx].data[14] = instance.material.toon.normal_texture_id;
+            std::memcpy(&object_data[instance_idx].data[15], &instance.material.toon.outline_color, sizeof(glm::vec4));
 
             if (instance.mesh_id.value < meshes_.size()) {
                 const auto& mesh = meshes_[instance.mesh_id.value];
@@ -528,6 +531,17 @@ std::expected<void, EngineError> VulkanRenderer::draw_frame(const RenderSnapshot
                     toon_count,
                     sizeof(VkDrawIndexedIndirectCommand)
                 );
+
+                if (toon_outline_pipeline_.pipeline != VK_NULL_HANDLE) {
+                    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, toon_outline_pipeline_.pipeline);
+                    vkCmdDrawIndexedIndirect(
+                        cmd, 
+                        indirect_buffer_.buffer, 
+                        toon_start_idx * sizeof(VkDrawIndexedIndirectCommand), 
+                        toon_count,
+                        sizeof(VkDrawIndexedIndirectCommand)
+                    );
+                }
             }
 
             // Skybox描画

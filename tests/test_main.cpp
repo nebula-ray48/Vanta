@@ -164,10 +164,26 @@ int main() {
             ImGui::Separator();
             
             static int material_type_selection = 1; // 0 = PBR, 1 = Toon (テスト用に1にしておく)
+            static float toon_threshold = 0.5f;
+            static float toon_feather = 0.02f;
+            static float toon_shade_color[3] = {0.25f, 0.28f, 0.45f};
+            static float outline_width = 1.0f;
+            static float outline_color[3] = {0.05f, 0.05f, 0.05f};
             
             if (ImGui::CollapsingHeader("Material", ImGuiTreeNodeFlags_DefaultOpen)) {
                 ImGui::RadioButton("PBR", &material_type_selection, 0); ImGui::SameLine();
                 ImGui::RadioButton("Toon", &material_type_selection, 1);
+
+                if (material_type_selection == 1) {
+                    ImGui::Separator();
+                    ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Toon Settings");
+                    ImGui::SliderFloat("Shadow Threshold", &toon_threshold, 0.0f, 1.0f, "%.2f");
+                    ImGui::SliderFloat("Shadow Feather", &toon_feather, 0.001f, 0.2f, "%.3f");
+                    ImGui::ColorEdit3("Shade Color Tint", toon_shade_color);
+                    ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.4f, 1.0f), "Outline Settings");
+                    ImGui::SliderFloat("Outline Width", &outline_width, 0.0f, 5.0f, "%.2f");
+                    ImGui::ColorEdit3("Outline Color", outline_color);
+                }
             }
             
             if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -286,9 +302,15 @@ int main() {
                     if (instance.material.pbr.albedo_texture_id != 0) {
                         instance.material.toon.albedo_texture_id = instance.material.pbr.albedo_texture_id;
                     }
-                    instance.material.toon.shade_color = glm::vec4(0.4f, 0.4f, 0.6f, 1.0f); // 少し青みがかった影
-                    instance.material.toon.threshold = 0.5f;
-                    instance.material.toon.feather = 0.02f; // トゥーン特有のくっきりした境界
+                    if (instance.material.pbr.normal_texture_id != 0) {
+                        instance.material.toon.normal_texture_id = instance.material.pbr.normal_texture_id;
+                        instance.material.toon.normal_scale = instance.material.pbr.normal_scale;
+                    }
+                    instance.material.toon.shade_color = glm::vec4(toon_shade_color[0], toon_shade_color[1], toon_shade_color[2], 1.0f);
+                    instance.material.toon.threshold = toon_threshold;
+                    instance.material.toon.feather = toon_feather;
+                    instance.material.toon.outline_width = outline_width;
+                    instance.material.toon.outline_color = glm::vec4(outline_color[0], outline_color[1], outline_color[2], 1.0f);
                 }
                 snapshot.instances.push_back(instance);
             }

@@ -518,7 +518,20 @@ std::expected<void, EngineError> VulkanRenderer::initialize_pipeline_resources()
         { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT, *toon_frag_module, "main", nullptr }
     };
 
-    std::vector<VkPipelineShaderStageCreateInfo> outline_stages = pbr_stages; // アウトラインは頂点シェーダーが違うはずだが今は仮
+    auto toon_outline_vert_spv = read_shader_file("assets/shaders/toon_outline_vert.spv");
+    if (!toon_outline_vert_spv) return std::unexpected(toon_outline_vert_spv.error());
+    auto toon_outline_frag_spv = read_shader_file("assets/shaders/toon_outline_frag.spv");
+    if (!toon_outline_frag_spv) return std::unexpected(toon_outline_frag_spv.error());
+
+    auto toon_outline_vert_module = create_shader_module(context_.device, *toon_outline_vert_spv);
+    if (!toon_outline_vert_module) return std::unexpected(toon_outline_vert_module.error());
+    auto toon_outline_frag_module = create_shader_module(context_.device, *toon_outline_frag_spv);
+    if (!toon_outline_frag_module) return std::unexpected(toon_outline_frag_module.error());
+
+    std::vector<VkPipelineShaderStageCreateInfo> outline_stages = {
+        { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, *toon_outline_vert_module, "main", nullptr },
+        { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT, *toon_outline_frag_module, "main", nullptr }
+    };
 
     // 3. ビューポート設定
     VkViewport const viewport{
@@ -574,7 +587,7 @@ std::expected<void, EngineError> VulkanRenderer::initialize_pipeline_resources()
 
         // Toon Outline パイプライン (表面カリング)
         auto outline_res = builder.with_shaders(outline_stages)
-                                  .with_cull_mode(VK_CULL_MODE_FRONT_BIT, VK_FRONT_FACE_CLOCKWISE)
+                                  .with_cull_mode(VK_CULL_MODE_FRONT_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE)
                                   .with_depth_test(VK_TRUE, VK_FALSE, VK_COMPARE_OP_LESS_OR_EQUAL) // アウトライン特有の設定
                                   .build(context_.device, color_formats, VK_FORMAT_D32_SFLOAT);
         if (!outline_res) return std::unexpected(outline_res.error());
@@ -696,6 +709,10 @@ std::expected<void, EngineError> VulkanRenderer::initialize_pipeline_resources()
     vkDestroyShaderModule(context_.device, *skybox_vert_module, nullptr);
     vkDestroyShaderModule(context_.device, *frag_module, nullptr);
     vkDestroyShaderModule(context_.device, *vert_module, nullptr);
+    if (toon_vert_module) vkDestroyShaderModule(context_.device, *toon_vert_module, nullptr);
+    if (toon_frag_module) vkDestroyShaderModule(context_.device, *toon_frag_module, nullptr);
+    if (toon_outline_vert_module) vkDestroyShaderModule(context_.device, *toon_outline_vert_module, nullptr);
+    if (toon_outline_frag_module) vkDestroyShaderModule(context_.device, *toon_outline_frag_module, nullptr);
     vkDestroyShaderModule(context_.device, *tonemap_frag_module, nullptr);
     vkDestroyShaderModule(context_.device, *tonemap_vert_module, nullptr);
     vkDestroyShaderModule(context_.device, *bloom_extract_frag_module, nullptr);
