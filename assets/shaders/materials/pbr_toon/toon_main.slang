@@ -7,80 +7,90 @@ import common_types;
 import common_bindings;
 import common_lighting;
 
-// Toon 用のディフューズ（拡散光）を計算する関数
+// =========================================================
+// 1. Toon ライティング金型関数群
+// =========================================================
+
+/**
+ * ① ディフューズ（明暗の階調比率 0.0=影, 1.0=日向）
+ */
 float calculate_toon_diffuse(float3 N, float3 L, float threshold, float feather) {
-    float NdotL = saturate(dot(N, L));
-    return smoothstep(threshold - feather, threshold + feather, NdotL);
+    float NdotL = dot(N, L);
+    float half_lambert = NdotL * 0.5 + 0.5; // ハーフランバートで自然な階調を作る
+    return smoothstep(threshold - feather, threshold + feather, half_lambert);
 }
 
 /**
- * 2. セル調リムライト（輪郭の光）を計算
- * @param N         : 表面の法線ベクトル
- * @param V         : カメラへの視線ベクトル
- * @param threshold : リムライトが出る角度のしきい値
- * @param feather   : リムライトの境界のボケ幅
- * @return          : リムライトの強さ (0.0 ~ 1.0)
+ * セルアニメ調の2段影（1影・2影）を計算する関数
+ * 
+ * @param albedo          : ベースのテクスチャカラー
+ * @param shade_color     : 影の色合い（青紫など）
+ * @param sun_color       : 太陽光の色と強さ
+ * @param ramp1           : 1影の明暗比率 (0.0=影, 1.0=日向)
+ * @param ramp2           : 2影の明暗比率 (0.0=濃い影, 1.0=浅い影)
+ * @return 陰影合成後のサーフェスカラー
  */
- float calculate_toon_rim(float3 N, float3 V, float threshold, float feather) {
-    // 視線と法線の内積（正面ほど 1.0、端っこ・輪郭ほど 0.0 になる）
+float3 calculate_two_step_shadow(
+    float3 albedo,
+    float3 shade_tint,
+    float3 sun_color,
+    float  ramp1,   // 1影の明暗比率 (0.0=影, 1.0=日向)
+    float  ramp2    // 2影の明暗比率 (0.0=濃い影, 1.0=浅い影)
+) {
+    // 1影（浅い影：青紫の色合いを綺麗に残す）
+    float3 shade1 = albedo * shade_tint * 1.8;
+    // 2影（深い落ち影：さらに暗く引き締める）
+    float3 shade2 = albedo * shade_tint * 0.8;
+
+    // 2段階ブレンド (2影 ↔ 1影 ↔ 日向)
+    float3 shadow = lerp(shade2, shade1, ramp2);
+    return lerp(shadow, albedo * sun_color, ramp1);
+}
+
+/**
+ * ③ セル調リムライト（輪郭の光）
+ */
+float calculate_toon_rim(float3 N, float3 V, float threshold, float feather) {
     float NdotV = saturate(dot(N, V));
-    
-    // 輪郭部分（端）を 1.0 に反転
     float rim = 1.0 - NdotV;
     return smoothstep(threshold - feather, threshold + feather, rim);
 }
 
 /**
- * 3. セル調ハイライト（天使の輪・金属のテカり）を計算
- * @param N         : 表面の法線ベクトル
- * @param L         : 光源への方向ベクトル
- * @param V         : カメラへの視線ベクトル
- * @param roughness : 表面の粗さ（ハイライトの広がり）
- * @return          : ハイライトの強さ (0.0 ~ 1.0)
+ * ④ セル調スペキュラ（ハイライト）
  */
 float calculate_toon_specular(float3 N, float3 L, float3 V, float threshold, float feather) {
-    // ハーフベクトル (光と視線の真ん中のベクトル)
     float3 H = normalize(L + V);
     float NdotH = saturate(dot(N, H));
-    // ステップ状にカットしてアニメ調のハイライトにする
     return smoothstep(threshold - feather, threshold + feather, NdotH);
 }
 
-/**
- * 4. 全てを統合して最終的なピクセルカラーを決定するメイン関数
- */
-float3 evaluate_toon_shading(
-    float3 albedo,          // ベースの色（テクスチャなど）
-    float3 shade_color,      // 影の色
-    float3 light_color,      // 太陽光の色と強さ
-    float3 N, float3 L, float3 V,
-    float  diffuse_threshold,
-    float  diffuse_feather
-) {
-    // ① 明暗比率を計算 (0.0 = 完全な影, 1.0 = 日向)
-    float ramp = calculate_toon_diffuse(N, L, diffuse_threshold, diffuse_feather);
-    // ② 影色とベース色をブレンド
-    float3 surface_color = lerp(shade_color, albedo, ramp);
-    // ③ 光の色を掛けて最終色にする
-    return surface_color * light_color;
-}
 
+// =========================================================
+// 2. 頂点シェーダー (Vertex Shader)
+// =========================================================
 [shader("vertex")]
 VertexOutput vertexMain(VertexInput input, uint instance_id : SV_InstanceID) {
     VertexOutput output;
+
     float4x4 model = objectBuffer[instance_id].model_matrix;
     float4 worldPos = mul(model, float4(input.position, 1.0));
+
     output.position = mul(globalData.viewProj, worldPos);
     output.worldPos = worldPos.xyz;
+
     output.color = input.color;
     output.normalDir = normalize(mul((float3x3)model, input.normalDir));
+
     output.uv = input.uv;
     output.instanceId = instance_id;
+
     return output;
 }
 
+
 // =========================================================
-// 3. フラグメントシェーダー（ピクセルごとの色決め）
+// 3. フラグメントシェーダー (Fragment Shader)
 // =========================================================
 [shader("fragment")]
 float4 fragmentMain(VertexOutput input) : SV_Target {
@@ -88,50 +98,50 @@ float4 fragmentMain(VertexOutput input) : SV_Target {
     // 1. データの準備
     // ---------------------------------------------------------
     ObjectData objData = objectBuffer[input.instanceId];
-    
-    // マテリアルパラメータ（Toon用）の取り出し
-    float4 base_color   = float4(asfloat(objData.data[0]), asfloat(objData.data[1]), asfloat(objData.data[2]), asfloat(objData.data[3]));
-    float4 shade_color  = float4(asfloat(objData.data[4]), asfloat(objData.data[5]), asfloat(objData.data[6]), asfloat(objData.data[7]));
-    float  threshold    = asfloat(objData.data[9]);  // 影のしきい値 (例: 0.5)
-    float  feather      = asfloat(objData.data[10]); // ボケ幅 (例: 0.02)
-    uint   albedo_tex   = objData.data[11];
+    ToonMaterialData matData = unpackToonMaterial(objData);
 
-    // ベクトルの正規化
     float3 N = normalize(input.normalDir);
+    if (matData.normal_texture_id != 0) {
+        uint normalID = NonUniformResourceIndex(matData.normal_texture_id);
+        N = getNormalFromMap(bindlessTextures[normalID], defaultSampler, input.uv, input.worldPos, N, matData.normal_scale);
+    }
+
     float3 L = normalize(globalData.sunDirection.xyz);
     float3 V = normalize(globalData.cameraPos - input.worldPos);
 
     // ---------------------------------------------------------
-    // 2. テクスチャカラーの取得
+    // 2. テクスチャカラー（アルベド）の取得
     // ---------------------------------------------------------
-    float3 albedo = base_color.rgb * input.color;
-    if (albedo_tex != 0) {
-        uint texID = NonUniformResourceIndex(albedo_tex);
+    float3 albedo = matData.base_color.rgb * input.color;
+    if (matData.albedo_texture_id != 0) {
+        uint texID = NonUniformResourceIndex(matData.albedo_texture_id);
         albedo *= bindlessTextures[texID].Sample(defaultSampler, input.uv).rgb;
     }
 
-    // 影色にもテクスチャの色を反映（ベースのテクスチャ色 × 指定した影の色合い）
-    float3 shadow_base = albedo * shade_color.rgb;
+    // ---------------------------------------------------------
+    // 3. ライティング計算（2段影・環境光・リムライト）
+    // ---------------------------------------------------------
+    // ① 2段影（1影: matData.threshold, 2影: その半分の深さ）
+    float ramp1 = calculate_toon_diffuse(N, L, matData.threshold, matData.feather);
+    float ramp2 = calculate_toon_diffuse(N, L, matData.threshold * 0.18, matData.feather);
+    float3 sun_color = globalData.sunColor.rgb * 0.9;
+    float3 diffuse = calculate_two_step_shadow(albedo, matData.shade_color.rgb, sun_color, ramp1, ramp2);
+
+    // ② 環境光（影が真っ暗になるのを防止）
+    float3 irradiance = evaluateSphericalHarmonics(N);
+    float3 ambient = irradiance * albedo * 0.12 * globalData.iblIntensity;
+
+    // ③ 青〜紫グラデーションのリムライト（輪郭光）
+    float rim_ramp = calculate_toon_rim(N, V, 0.65, 0.15);
+    float3 cyan_blue = float3(0.1, 0.6, 1.0);  // 青
+    float3 purple    = float3(0.8, 0.2, 1.0);  // 紫
+    float3 rim_color = lerp(cyan_blue, purple, rim_ramp);
+    float3 rim_light = rim_ramp * rim_color * 1.8;
 
     // ---------------------------------------------------------
-    // 3. セル陰影の計算 (Toon Diffuse)
+    // 4. 最終合成
     // ---------------------------------------------------------
-    // ① 金型関数を呼んで 0.0(影) 〜 1.0(日向) の比率を計算
-    float ramp = calculate_toon_diffuse(N, L, threshold, feather);
+    float3 final_color = diffuse + ambient + rim_light;
 
-    // ② 太陽光の色と強さ
-    float3 sun_light = globalData.sunColor.rgb * globalData.sunDirection.w;
-
-    // ③ 影色と日向色をブレンド
-    float3 diffuse = lerp(shadow_base, albedo * sun_light, ramp);
-
-    // ---------------------------------------------------------
-    // 4. 環境光（アンビエント）の足し合わせ
-    // ---------------------------------------------------------
-    // 球面調和（SH）から環境の光を少し拾って足すことで、真っ黒になるのを防ぐ
-    float3 ambient = evaluateSphericalHarmonics(N) * albedo * 0.2 * globalData.iblIntensity;
-
-    float3 final_color = diffuse + ambient;
-
-    return float4(final_color, base_color.a);
+    return float4(final_color, matData.base_color.a);
 }
